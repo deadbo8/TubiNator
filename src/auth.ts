@@ -12,18 +12,23 @@ const credsSchema = z.object({
   password: z.string().min(6),
 });
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  ...authConfig,
-  adapter: PrismaAdapter(prisma),
-  session: { strategy: "jwt" },
-  providers: [
+// Build providers dynamically so missing Google credentials don't crash all of
+// auth (you can run with email/password only and add Google later).
+const providers = [];
+
+if (process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET) {
+  providers.push(
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
       // Keep Auth.js default (block) for password<->Google linking in V1.
       allowDangerousEmailAccountLinking: false,
     }),
-    Credentials({
+  );
+}
+
+providers.push(
+  Credentials({
       credentials: { email: {}, password: {} },
       async authorize(raw) {
         const parsed = credsSchema.safeParse(raw);
@@ -41,5 +46,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         };
       },
     }),
-  ],
+);
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
+  adapter: PrismaAdapter(prisma),
+  session: { strategy: "jwt" },
+  providers,
 });

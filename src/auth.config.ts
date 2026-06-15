@@ -3,6 +3,9 @@ import type { NextAuthConfig } from "next-auth";
 // Edge-safe config (no Prisma, no bcrypt). Used by middleware and spread into
 // the full auth.ts config.
 export const authConfig = {
+  // Trust the host/proxy headers (we run behind Caddy). Avoids Auth.js
+  // "UntrustedHost" errors. Can also be forced via AUTH_TRUST_HOST=true.
+  trustHost: true,
   pages: { signIn: "/login" },
   providers: [], // real providers are added in auth.ts
   callbacks: {

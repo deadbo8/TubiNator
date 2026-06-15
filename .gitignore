@@ -7,3 +7,8 @@ dist
 *.log
 .DS_Store
 prisma/*.db
+
+# Python (Telegram bot)
+__pycache__/
+*.pyc
+.venv/

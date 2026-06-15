@@ -81,9 +81,17 @@ export default function GeneratePage() {
                 <button
                   key={l}
                   onClick={() => setLevel(l)}
-                  className={`glass-input rounded-xl px-4 py-3 text-left transition ${level === l ? "border-[hsl(var(--primary))]" : ""}`}
+                  aria-pressed={level === l}
+                  className={`glass-input flex items-center justify-between rounded-xl px-4 py-3 text-left transition ${
+                    level === l
+                      ? "border-2 border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/15 font-semibold"
+                      : "border border-transparent hover:border-white/20"
+                  }`}
                 >
-                  {l}
+                  <span>{l}</span>
+                  {level === l && (
+                    <span className="text-[hsl(var(--primary))]">✓</span>
+                  )}
                 </button>
               ))}
             </div>
