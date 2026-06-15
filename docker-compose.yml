@@ -27,28 +27,12 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "3000:3000"
-    networks: [tubinator]
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on: [web]
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN:-localhost}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
+      # Map to localhost so it is only reachable by the reverse proxy
+      - "127.0.0.1:3001:3000"
     networks: [tubinator]
 
 volumes:
   pgdata:
-  caddy_data:
-  caddy_config:
 
 networks:
   tubinator:
