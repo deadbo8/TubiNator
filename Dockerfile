@@ -26,7 +26,7 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 # Full node_modules are kept so the Prisma CLI is available at startup
-# (entrypoint runs `prisma migrate deploy`).
+# (entrypoint runs `prisma db push` to sync the schema).
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public

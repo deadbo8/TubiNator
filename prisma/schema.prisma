@@ -11,6 +11,7 @@ model User {
   id              String       @id @default(cuid())
   name            String?
   email           String?      @unique
+  telegramId      String?      @unique // set for users who joined via the Telegram bot
   emailVerified   DateTime?
   image           String?
   passwordHash    String?      // credentials login

@@ -27,12 +27,57 @@ services:
       db:
         condition: service_healthy
     ports:
-      # Map to localhost so it is only reachable by the reverse proxy
-      - "127.0.0.1:3001:3000"
+      # Bound to localhost only; reach the app directly at 127.0.0.1:3002 if needed.
+      - "127.0.0.1:3002:3000"
+    networks:
+      tubinator:
+      # Joined to your existing Caddy's network so it can proxy to us by name.
+      proxy:
+        aliases:
+          - tubinator-web
+
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      API_BASE_URL: http://web:3000
+    depends_on: [web]
+    networks: [tubinator]
+
+  # Optional bundled reverse proxy. NOT started by default.
+  # Only use this if you do NOT already have a proxy on this host.
+  # Start it with:  docker compose --profile standalone-proxy up -d
+  # If you route Tubinator through your existing main Caddy (recommended for
+  # DuckDNS), leave this disabled and proxy to 127.0.0.1:3002 instead.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["standalone-proxy"]
+    restart: unless-stopped
+    depends_on: [web]
+    ports:
+      - "8080:80"
+      - "9443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
     networks: [tubinator]
 
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
 
 networks:
   tubinator:
+  # Your existing reverse-proxy network. Confirm the real name with:
+  #   docker inspect caddy | python3 -c "import sys,json;print(list(json.load(sys.stdin)[0]['NetworkSettings']['Networks'].keys()))"
+  # It is almost certainly hoodik_default (the hoodik compose project network).
+  proxy:
+    external: true
+    name: hoodik_default

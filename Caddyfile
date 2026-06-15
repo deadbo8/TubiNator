@@ -1,7 +1,25 @@
-# Tubinator reverse proxy.
-# Set DOMAIN in .env to your real domain for automatic HTTPS (Let's Encrypt).
-# For local testing leave DOMAIN=localhost (Caddy serves a self-signed cert).
+# Tubinator reverse proxy (Option B: non-standard host ports 8080 / 9443).
+#
+# Because the public 80/443 are used by another container on this host, this
+# Caddy cannot run Let's Encrypt (ACME needs ports 80/443 reachable). It serves:
+#   - plain HTTP  on container :80  -> published as host 8080
+#   - self-signed HTTPS on :443     -> published as host 9443  (tls internal)
+#
+# Access:  http://YOUR_HOST:8080   or   https://YOUR_HOST:9443 (cert warning)
+#
+# For a real trusted cert, route this app through your existing main `caddy`
+# container instead (reverse_proxy to 127.0.0.1:3002 or to web:3000 on a shared
+# Docker network), and you can drop this caddy service entirely.
 
-{$DOMAIN:localhost} {
+{
+	auto_https off
+}
+
+:443 {
+	tls internal
+	reverse_proxy web:3000
+}
+
+:80 {
 	reverse_proxy web:3000
 }

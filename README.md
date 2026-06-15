@@ -99,9 +99,53 @@ This starts three containers:
 
 - `db` - PostgreSQL 16 (data persisted in the `pgdata` volume)
 - `web` - the Next.js app on port 3000
-- `caddy` - reverse proxy on ports 80/443 with automatic HTTPS
+- `caddy` - reverse proxy on host ports 8080 (HTTP) / 9443 (HTTPS, self-signed)
 
-Visit `https://yourdomain.com` (or `http://localhost` locally).
+> **Port mapping (Option B).** The public 80/443 on this host are used by other
+> containers, so Tubinator is remapped to free ports: web -> 127.0.0.1:3002
+> (localhost only), caddy HTTP -> 8080, caddy HTTPS -> 9443 (self-signed via
+> `tls internal`). Automatic Let's Encrypt is disabled because ACME needs the
+> public 80/443.
+
+Visit `http://YOUR_HOST:8080` or `https://YOUR_HOST:9443` (browsers warn on the
+self-signed cert). For a trusted cert, route the app through your existing main
+Caddy/nginx instead of running this `caddy` service.
+
+## 4b. Free domain + trusted HTTPS with DuckDNS
+
+You don't need a domain to run Tubinator (IP + self-signed cert works), but a
+free DuckDNS hostname gives you a clean URL and a trusted Let's Encrypt cert.
+
+**Recommended setup (route through an existing Caddy that owns 80/443):**
+
+1. Sign in at https://www.duckdns.org with GitHub/Google and create a subdomain,
+   e.g. `tubinator`. You get `tubinator.duckdns.org` and a token.
+2. Point it at your server's public IP (set it on the DuckDNS dashboard, or run
+   their updater so it auto-tracks your IP).
+3. Start Tubinator WITHOUT the bundled proxy (default). This runs db + web only,
+   with the app on `127.0.0.1:3002`:
+   ```bash
+   docker compose up -d --build
+   ```
+4. Add a site block to your EXISTING main Caddy and reload it:
+   ```
+   tubinator.duckdns.org {
+       reverse_proxy 127.0.0.1:3002
+   }
+   ```
+   Your main Caddy already holds 80/443, so it fetches a free Let's Encrypt cert
+   automatically over the HTTP-01 challenge. No DNS plugin needed.
+5. Set `NEXTAUTH_URL=https://tubinator.duckdns.org` in `.env` and restart web:
+   ```bash
+   docker compose up -d web
+   ```
+
+Visit `https://tubinator.duckdns.org` — trusted HTTPS, no port in the URL.
+
+**Alternative (no existing proxy): bundled Caddy + DuckDNS DNS challenge.** The
+stock `caddy:2-alpine` image lacks the DuckDNS DNS plugin, so you'd need a custom
+image built with `xcaddy --with github.com/caddy-dns/duckdns` and a `tls { dns
+duckdns <token> }` block. Routing through an existing Caddy (above) is simpler.
 
 ## 5. Useful commands
 
@@ -161,3 +205,45 @@ prisma/schema.prisma
   (`HOUSE_DAILY_LIMIT`, default 5) protects it. BYOK users bypass the cap.
 - The YouTube API no longer exposes dislike counts (removed in 2021), so ranking
   uses views + likes only.
+
+## 7. Telegram bot (full app, in chat)
+
+Tubinator ships a pure chat bot (Python / aiogram) that replicates the whole
+web experience inside Telegram: generate courses, browse modules & lessons,
+watch the picked YouTube video, track progress, and optionally bring your own
+API keys. It talks to the same backend over a private, secret-protected API
+(`/api/bot/*`) on the internal Docker network, so nothing extra is exposed to
+the internet.
+
+### Setup
+
+1. In Telegram, message **@BotFather**, send `/newbot`, and copy the token.
+2. In your `.env`, set:
+   - `BOT_TOKEN` = the token from BotFather
+   - `BOT_API_SECRET` = a random secret shared by the web API and the bot.
+     Generate one with: `openssl rand -hex 24`
+3. Build and start everything (db + web + bot):
+   ```bash
+   docker compose up -d --build
+   ```
+   The `bot` service polls Telegram (long polling) and reaches the web app at
+   `http://web:3000` inside the Docker network, so it is unaffected by the
+   host port remap (127.0.0.1:3002).
+
+### Using it
+
+- `/learn` - wizard: topic -> level (Beginner/Intermediate/Advanced) -> goal,
+  then it generates your course.
+- `/courses` - list your courses with progress; tap one to open it.
+- Inside a course, each lesson has a watch button (sends the YouTube link,
+  which Telegram plays inline) and a checkbox to toggle completion.
+- `/settings` - add or clear your own Groq / YouTube keys (BYOK). Your key
+  message is auto-deleted after it is stored encrypted.
+- `/cancel` - abort the current wizard. `/help` - command list.
+
+### Notes
+
+- The bot identifies users by their Telegram ID (`telegramId` on `User`),
+  so a fresh DB migration is required before first run (see section 2).
+- Videos are sent as links rather than uploads; Telegram renders an inline
+  player. This keeps the bot fast and within Telegram's file limits.
