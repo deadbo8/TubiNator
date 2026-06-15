@@ -1,0 +1,7 @@
+# Tubinator reverse proxy.
+# Set DOMAIN in .env to your real domain for automatic HTTPS (Let's Encrypt).
+# For local testing leave DOMAIN=localhost (Caddy serves a self-signed cert).
+
+{$DOMAIN:localhost} {
+	reverse_proxy web:3000
+}

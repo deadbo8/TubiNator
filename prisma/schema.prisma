@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String       @id @default(cuid())
+  name            String?
+  email           String?      @unique
+  emailVerified   DateTime?
+  image           String?
+  passwordHash    String?      // credentials login
+  groqApiKey      String?      // encrypted, BYOK
+  youtubeApiKey   String?      // encrypted, BYOK
+  dailyGenCount   Int          @default(0)  // house-key rate limiting
+  dailyGenResetAt DateTime?
+  accounts        Account[]
+  courses         Course[]     // courses this user authored
+  enrollments     Enrollment[]
+  progress        Progress[]
+  createdAt       DateTime     @default(now())
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Course {
+  id          String       @id @default(cuid())
+  title       String
+  topic       String
+  level       String
+  goal        String
+  authorId    String?
+  author      User?        @relation(fields: [authorId], references: [id])
+  modules     Module[]
+  enrollments Enrollment[]
+  createdAt   DateTime     @default(now())
+
+  @@unique([topic, level, goal]) // dedupe / shared cache key
+}
+
+model Enrollment {
+  id        String   @id @default(cuid())
+  userId    String
+  courseId  String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, courseId])
+}
+
+model Module {
+  id       String   @id @default(cuid())
+  title    String
+  order    Int
+  courseId String
+  course   Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons  Lesson[]
+}
+
+model Lesson {
+  id           String     @id @default(cuid())
+  title        String
+  description  String     // AI summary / task
+  youtubeQuery String
+  order        Int
+  videoId      String?
+  video        Video?     @relation(fields: [videoId], references: [id])
+  moduleId     String
+  module       Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  progress     Progress[]
+}
+
+model Video {
+  id          String   @id @default(cuid())
+  youtubeId   String   @unique
+  title       String
+  channelName String
+  duration    Int      // seconds
+  viewCount   Int?
+  likeCount   Int?
+  cachedAt    DateTime @default(now())
+  lessons     Lesson[]
+}
+
+model Progress {
+  id        String   @id @default(cuid())
+  userId    String
+  lessonId  String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  completed Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, lessonId])
+}
