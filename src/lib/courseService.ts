@@ -24,7 +24,7 @@ export async function resolveTelegramUser(
 ): Promise<string> {
   const user = await prisma.user.upsert({
     where: { telegramId },
-    update: name ? { name } : {},
+    update: {},
     create: { telegramId, name },
   });
   return user.id;

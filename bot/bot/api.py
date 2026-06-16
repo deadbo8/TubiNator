@@ -129,6 +129,14 @@ async def set_password(telegram_id, new_password, current_password=None):
     return await _request("POST", "/api/bot/password", json=payload)
 
 
+async def set_name(telegram_id, name):
+    return await _request(
+        "POST",
+        "/api/bot/name",
+        json={"telegramId": str(telegram_id), "name": name},
+    )
+
+
 async def login_password(telegram_id, email, password):
     return await _request(
         "POST",

@@ -86,6 +86,10 @@ class Forgot(StatesGroup):
     password = State()
 
 
+class Profile(StatesGroup):
+    name = State()
+
+
 def fmt_duration(seconds) -> str:
     s = int(seconds or 0)
     h, rem = divmod(s, 3600)
@@ -864,16 +868,37 @@ async def pw_new(msg: Message, state: FSMContext):
         await msg.answer(f"⚠️ {html.escape(str(e))}")
         return
     if data.get("signup"):
+        await state.set_state(Profile.name)
         await msg.answer(
-            "🎉 <b>Account ready!</b> Your password is set. "
-            "What would you like to do?",
-            reply_markup=main_menu_kb(),
+            "✅ Password set. Last thing — what name should I use for your "
+            "account? It shows on the website and in greetings."
         )
+        return
     else:
         await msg.answer(
             "✅ Password updated. Your message was deleted for safety.",
             reply_markup=main_menu_kb(),
         )
+
+
+@router.message(Profile.name, F.text, ~F.text.startswith("/"))
+async def signup_name(msg: Message, state: FSMContext):
+    name = msg.text.strip()[:80]
+    await state.clear()
+    if name:
+        try:
+            await api.set_name(msg.from_user.id, name)
+        except ApiError as e:
+            await msg.answer(f"⚠️ {html.escape(str(e))}")
+    greeting = (
+        f"🎉 <b>Account ready!</b> Welcome, {html.escape(name)}!"
+        if name
+        else "🎉 <b>Account ready!</b>"
+    )
+    await msg.answer(
+        f"{greeting} What would you like to do?",
+        reply_markup=main_menu_kb(),
+    )
 
 
 # ---- BYOK keys ----

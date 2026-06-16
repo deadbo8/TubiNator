@@ -26,6 +26,14 @@ function safeMask(encrypted: string | null): string | null {
 }
 
 /** Full account snapshot for the bot's /me and /settings screens. */
+export async function setBotName(telegramId: string, nameRaw: string) {
+  const name = nameRaw.trim().slice(0, 80);
+  if (!name) throw new ServiceError("Name required", 400);
+  const userId = await resolveTelegramUser(telegramId);
+  await prisma.user.update({ where: { id: userId }, data: { name } });
+  return { ok: true };
+}
+
 export async function getBotAccount(telegramId: string, name?: string) {
   const userId = await resolveTelegramUser(telegramId, name);
   const user = await prisma.user.findUnique({ where: { id: userId } });
