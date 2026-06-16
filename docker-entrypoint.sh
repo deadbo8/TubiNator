@@ -6,7 +6,7 @@ echo "==> Syncing database schema..."
 # Safe + idempotent: on first boot it creates all tables; later it adds new
 # columns (e.g. telegramId). It aborts rather than destroy data, so a failed
 # push leaves your data intact.
-npx prisma db push --skip-generate
+npx prisma db push --skip-generate --accept-data-loss
 
 echo "==> Starting Tubinator..."
 exec "$@"
