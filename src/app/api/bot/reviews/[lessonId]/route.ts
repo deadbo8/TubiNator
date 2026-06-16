@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkBotSecret } from "@/lib/botAuth";
-import { resolveTelegramUser, ServiceError } from "@/lib/courseService";
+import { requireVerifiedTelegramUser, ServiceError } from "@/lib/courseService";
 import { gradeReview } from "@/lib/gamification";
 import { z } from "zod";
 
@@ -22,7 +22,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
   try {
-    const userId = await resolveTelegramUser(parsed.data.telegramId);
+    const userId = await requireVerifiedTelegramUser(parsed.data.telegramId);
     const result = await gradeReview(userId, params.lessonId, parsed.data.remembered);
     if (!result.ok)
       return NextResponse.json({ error: "Review not found" }, { status: 404 });

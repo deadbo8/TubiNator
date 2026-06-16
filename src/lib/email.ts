@@ -42,13 +42,22 @@ export async function sendEmail({ to, subject, html }: SendEmailArgs): Promise<v
 }
 
 /** Branded HTML wrapper for a one-time code email. */
-export function otpEmailHtml(code: string, purpose: "verify" | "login"): string {
+export function otpEmailHtml(
+  code: string,
+  purpose: "verify" | "login" | "reset",
+): string {
   const heading =
-    purpose === "verify" ? "Verify your email" : "Your login code";
+    purpose === "verify"
+      ? "Verify your email"
+      : purpose === "reset"
+        ? "Reset your password"
+        : "Your login code";
   const intro =
     purpose === "verify"
       ? "Welcome to Tubinator! Use the code below to verify your email and finish creating your account."
-      : "Use the code below to sign in to Tubinator.";
+      : purpose === "reset"
+        ? "Use the code below to reset your Tubinator password. If you didn't request this, you can safely ignore this email."
+        : "Use the code below to sign in to Tubinator.";
   return `<!doctype html>
 <html>
   <body style="margin:0;background:#0a0a0b;font-family:Inter,Arial,sans-serif;color:#e7e7ea;padding:40px 0;">

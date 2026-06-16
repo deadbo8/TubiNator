@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { checkBotSecret } from "@/lib/botAuth";
 import {
-  resolveTelegramUser,
+  requireVerifiedTelegramUser,
   setProgress,
   ServiceError,
 } from "@/lib/courseService";
@@ -25,7 +25,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
   try {
-    const userId = await resolveTelegramUser(parsed.data.telegramId);
+    const userId = await requireVerifiedTelegramUser(parsed.data.telegramId);
     const { progress, reward } = await setProgress(
       userId,
       params.id,

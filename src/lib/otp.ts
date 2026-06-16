@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { sendEmail, otpEmailHtml } from "@/lib/email";
 
-export type OtpPurpose = "verify" | "login";
+export type OtpPurpose = "verify" | "login" | "reset";
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_ATTEMPTS = 5;
@@ -39,7 +39,9 @@ export async function createAndSendOtp(
     subject:
       purpose === "verify"
         ? "Verify your Tubinator email"
-        : "Your Tubinator login code",
+        : purpose === "reset"
+          ? "Reset your Tubinator password"
+          : "Your Tubinator login code",
     html: otpEmailHtml(code, purpose),
   });
 }

@@ -3,6 +3,61 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 LEVELS = ["Beginner", "Intermediate", "Advanced"]
 
 
+def login_kb() -> InlineKeyboardMarkup:
+    """Entry point: choose to sign up or log in."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🆕 Sign up", callback_data="signup")],
+            [InlineKeyboardButton(text="🔑 Log in", callback_data="loginmenu")],
+        ]
+    )
+
+
+def login_methods_kb() -> InlineKeyboardMarkup:
+    """Choose how to log in: password, email code, or reset password."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔑 With password", callback_data="login:pw"),
+                InlineKeyboardButton(
+                    text="✉️ With email code", callback_data="login:otp"
+                ),
+            ],
+            [InlineKeyboardButton(text="🔓 Forgot password?", callback_data="forgot")],
+        ]
+    )
+
+
+def setpw_kb() -> InlineKeyboardMarkup:
+    """Single CTA to set a password (finish account setup)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔒 Set a password", callback_data="setpw")]
+        ]
+    )
+
+
+def main_menu_kb() -> InlineKeyboardMarkup:
+    """Primary navigation shown to logged-in users."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✨ Learn something new", callback_data="menu:learn"
+                )
+            ],
+            [
+                InlineKeyboardButton(text="📚 My courses", callback_data="mycourses"),
+                InlineKeyboardButton(text="🧠 Review", callback_data="menu:review"),
+            ],
+            [
+                InlineKeyboardButton(text="🌐 Explore", callback_data="menu:explore"),
+                InlineKeyboardButton(text="⚙️ Settings", callback_data="menu:settings"),
+            ],
+        ]
+    )
+
+
 def level_kb() -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text=lv, callback_data=f"level:{lv}")] for lv in LEVELS]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -44,13 +99,19 @@ def course_kb(course) -> InlineKeyboardMarkup:
 def settings_kb(account) -> InlineKeyboardMarkup:
     """Settings menu mirroring the website: email, password, and BYOK keys."""
     rows = []
-    if account.get("emailVerified"):
-        pw_label = "🔒 Change password" if account.get("hasPassword") else "🔒 Set password"
-        rows.append([InlineKeyboardButton(text=pw_label, callback_data="setpw")])
-    else:
+    if not account.get("emailVerified"):
+        # Not logged in yet: the only available action is to verify the email.
         rows.append(
-            [InlineKeyboardButton(text="✉️ Link & verify email", callback_data="linkemail")]
+            [
+                InlineKeyboardButton(
+                    text="✉️ Log in / verify email", callback_data="linkemail"
+                )
+            ]
         )
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    pw_label = "🔒 Change password" if account.get("hasPassword") else "🔒 Set password"
+    rows.append([InlineKeyboardButton(text=pw_label, callback_data="setpw")])
     groq_label = (
         "🔑 Update Groq key" if account.get("usingOwnGroq") else "🔑 Add Groq key"
     )
@@ -61,6 +122,7 @@ def settings_kb(account) -> InlineKeyboardMarkup:
     )
     rows.append([InlineKeyboardButton(text=groq_label, callback_data="setkey:groq")])
     rows.append([InlineKeyboardButton(text=yt_label, callback_data="setkey:youtube")])
+    rows.append([InlineKeyboardButton(text="🚪 Sign out", callback_data="signout")])
     clear_row = []
     if account.get("usingOwnGroq"):
         clear_row.append(

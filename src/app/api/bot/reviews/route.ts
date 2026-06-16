@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkBotSecret } from "@/lib/botAuth";
-import { resolveTelegramUser, ServiceError } from "@/lib/courseService";
+import { requireVerifiedTelegramUser, ServiceError } from "@/lib/courseService";
 import { getDueReviews, getStats } from "@/lib/gamification";
 
 export async function GET(req: Request) {
@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Missing telegramId" }, { status: 400 });
 
   try {
-    const userId = await resolveTelegramUser(telegramId);
+    const userId = await requireVerifiedTelegramUser(telegramId);
     const [reviews, stats] = await Promise.all([
       getDueReviews(userId),
       getStats(userId),

@@ -129,6 +129,42 @@ async def set_password(telegram_id, new_password, current_password=None):
     return await _request("POST", "/api/bot/password", json=payload)
 
 
+async def login_password(telegram_id, email, password):
+    return await _request(
+        "POST",
+        "/api/bot/login",
+        json={
+            "telegramId": str(telegram_id),
+            "email": email,
+            "password": password,
+        },
+    )
+
+
+async def signout(telegram_id):
+    return await _request(
+        "POST",
+        "/api/bot/signout",
+        json={"telegramId": str(telegram_id)},
+    )
+
+
+async def forgot_start(email):
+    return await _request(
+        "POST",
+        "/api/auth/forgot/start",
+        json={"email": email},
+    )
+
+
+async def forgot_reset(email, code, password):
+    return await _request(
+        "POST",
+        "/api/auth/forgot/reset",
+        json={"email": email, "code": code, "password": password},
+    )
+
+
 # ---- Reviews (spaced repetition) ----
 async def get_reviews(telegram_id):
     return await _request(

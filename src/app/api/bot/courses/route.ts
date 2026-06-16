@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { checkBotSecret } from "@/lib/botAuth";
 import {
   resolveTelegramUser,
+  requireVerifiedTelegramUser,
   generateCourse,
   listEnrollments,
   ServiceError,
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
     );
 
   try {
-    const userId = await resolveTelegramUser(
+    const userId = await requireVerifiedTelegramUser(
       parsed.data.telegramId,
       parsed.data.name,
     );

@@ -81,6 +81,54 @@ export async function linkEmailConfirm(
   const ok = await verifyOtp(email, code, "verify");
   if (!ok) throw new ServiceError("Invalid or expired code", 400);
 
+  return linkTelegramToEmail(telegramId, email);
+}
+
+/**
+ * Verify a password against an existing email account, then link this Telegram
+ * device to it. Powers the bot's "log in with password" flow.
+ */
+export async function linkEmailWithPassword(
+  telegramId: string,
+  emailRaw: string,
+  password: string,
+) {
+  const email = normalizeEmail(emailRaw);
+  const emailUser = await prisma.user.findUnique({ where: { email } });
+  if (!emailUser || !emailUser.passwordHash)
+    throw new ServiceError("No account with that email and password", 400);
+  if (emailUser.banned) throw new ServiceError("This account is banned", 403);
+  if (!emailUser.emailVerified)
+    throw new ServiceError("That email isn't verified yet", 400);
+  const okPw = await bcrypt.compare(password, emailUser.passwordHash);
+  if (!okPw) throw new ServiceError("Incorrect email or password", 400);
+  return linkTelegramToEmail(telegramId, email);
+}
+
+/**
+ * Sign the Telegram device out of its account. A Telegram-only account (no
+ * email) is removed; an account with an email keeps its web side intact and
+ * just detaches the Telegram ID.
+ */
+export async function signOutTelegram(telegramId: string) {
+  const user = await prisma.user.findUnique({ where: { telegramId } });
+  if (!user) return { ok: true };
+  if (!user.email) {
+    await prisma.user.delete({ where: { id: user.id } });
+  } else {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { telegramId: null },
+    });
+  }
+  return { ok: true };
+}
+
+/**
+ * Shared linking/merge logic: attach `telegramId` to the account that owns
+ * `email`, merging a Telegram-only account into it when one already exists.
+ */
+async function linkTelegramToEmail(telegramId: string, email: string) {
   const tgUserId = await resolveTelegramUser(telegramId);
   const tgUser = await prisma.user.findUnique({ where: { id: tgUserId } });
   if (!tgUser) throw new ServiceError("Account not found", 404);

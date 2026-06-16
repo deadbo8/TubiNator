@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkBotSecret } from "@/lib/botAuth";
-import { resolveTelegramUser, ServiceError } from "@/lib/courseService";
+import { requireVerifiedTelegramUser, ServiceError } from "@/lib/courseService";
 import { enrollUser } from "@/lib/catalog";
 import { z } from "zod";
 
@@ -19,7 +19,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
   try {
-    const userId = await resolveTelegramUser(parsed.data.telegramId);
+    const userId = await requireVerifiedTelegramUser(parsed.data.telegramId);
     const result = await enrollUser(userId, params.id);
     if (!result.ok)
       return NextResponse.json({ error: result.error }, { status: result.status });

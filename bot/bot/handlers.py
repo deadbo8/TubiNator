@@ -16,8 +16,12 @@ from .keyboards import (
     courses_kb,
     explore_kb,
     level_kb,
+    login_kb,
+    login_methods_kb,
+    main_menu_kb,
     review_grade_kb,
     settings_kb,
+    setpw_kb,
 )
 
 router = Router()
@@ -31,7 +35,10 @@ HELP_TEXT = (
     "/review – review due lessons (spaced repetition)\n"
     "/explore – browse &amp; add public courses\n"
     "/me – your account, XP &amp; streak\n"
-    "/login – link your email to sync with the website\n"
+    "/signup – create a Tubinator account\n"
+    "/login – log in (password or email code)\n"
+    "/forgot – reset your password\n"
+    "/signout – sign out of this device\n"
     "/settings – email, password &amp; API keys\n"
     "/admin – admin panel (admins only)\n"
     "/cancel – abort the current action\n"
@@ -65,6 +72,17 @@ class AdminLimit(StatesGroup):
 
 class Explore(StatesGroup):
     query = State()
+
+
+class LoginPw(StatesGroup):
+    email = State()
+    password = State()
+
+
+class Forgot(StatesGroup):
+    email = State()
+    code = State()
+    password = State()
 
 
 def fmt_duration(seconds) -> str:
@@ -133,16 +151,71 @@ def render_account_text(acc) -> str:
     return "\n".join(lines)
 
 
+# ---- login gate ----
+async def _fetch_account(telegram_id, name=None):
+    return (await api.get_account(telegram_id, name))["account"]
+
+
+async def _require_login(target, telegram_id, name=None):
+    """Return the account if the user is logged in (verified email) and not
+    banned; otherwise send a friendly prompt and return None."""
+    try:
+        acc = await _fetch_account(telegram_id, name)
+    except ApiError as e:
+        await target.answer(f"⚠️ {html.escape(str(e))}")
+        return None
+    if acc.get("banned"):
+        await target.answer("🚫 This account is banned. Contact an admin.")
+        return None
+    if not acc.get("emailVerified"):
+        await target.answer(
+            "🔒 <b>Login required</b>\n\n"
+            "Tubinator keeps your courses, XP and streak tied to your account, "
+            "so first verify your email — it takes about 20 seconds and unlocks "
+            "everything.\n\n"
+            "Tap below or send /login to begin.",
+            reply_markup=login_kb(),
+        )
+        return None
+    if not acc.get("hasPassword"):
+        await target.answer(
+            "🔒 <b>Almost there!</b>\n\n"
+            "Finish creating your account by setting a password. Then you can "
+            "log in with email + password or a one-time code.",
+            reply_markup=setpw_kb(),
+        )
+        return None
+    return acc
+
+
 # ---- start / help / cancel ----
 @router.message(CommandStart())
 async def cmd_start(msg: Message, state: FSMContext):
     await state.clear()
+    try:
+        acc = await _fetch_account(msg.from_user.id, msg.from_user.full_name)
+    except ApiError:
+        acc = None
+    if acc and acc.get("emailVerified"):
+        name = html.escape(acc.get("name") or "")
+        greeting = f"👋 Welcome back, {name}!" if name else "👋 Welcome back!"
+        await msg.answer(
+            f"{greeting} What would you like to do?",
+            reply_markup=main_menu_kb(),
+        )
+        return
+    limit = (acc or {}).get("limit", 5)
     await msg.answer(
-        "👋 Welcome to <b>Tubinator</b>!\n\n"
-        "Tell me what you want to learn and I'll build you a custom course of "
-        "the best YouTube tutorials, organized into modules and lessons.\n\n"
-        "Tap /learn to begin, or /settings to link your email so your courses "
-        "sync with the website."
+        "👋 <b>Welcome to Tubinator!</b>\n\n"
+        "I turn any topic into a personalized course of the best YouTube "
+        "lessons — split into modules, with progress tracking, XP, streaks "
+        "and spaced-repetition review.\n\n"
+        "🔒 <b>First, a quick login.</b>\n"
+        "Verify your email (about 20 seconds) so your courses sync with the "
+        f"website and stay safe. You'll get <b>{limit} free course "
+        "generations per day</b>.\n\n"
+        "Tap below or send /login to begin.",
+        reply_markup=login_kb(),
     )
 
 
@@ -158,9 +231,57 @@ async def cmd_cancel(msg: Message, state: FSMContext):
     await msg.answer("Cancelled.")
 
 
+# ---- main menu (inline navigation) ----
+@router.callback_query(F.data == "menu:learn")
+async def cb_menu_learn(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    if not await _require_login(cb.message, cb.from_user.id, cb.from_user.full_name):
+        return
+    await state.set_state(Learn.topic)
+    await cb.message.answer(
+        "What do you want to learn? <i>(e.g. PostgreSQL indexing)</i>"
+    )
+
+
+@router.callback_query(F.data == "menu:review")
+async def cb_menu_review(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    if not await _require_login(cb.message, cb.from_user.id, cb.from_user.full_name):
+        return
+    await _send_next_review(cb.message, cb.from_user.id)
+
+
+@router.callback_query(F.data == "menu:explore")
+async def cb_menu_explore(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    if not await _require_login(cb.message, cb.from_user.id, cb.from_user.full_name):
+        return
+    await state.set_state(Explore.query)
+    await cb.message.answer(
+        "🔍 Send a topic to search the public catalog, or send "
+        "<b>all</b> to see everything."
+    )
+
+
+@router.callback_query(F.data == "menu:settings")
+async def cb_menu_settings(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    try:
+        await _show_settings(cb.message, cb.from_user.id, cb.from_user.full_name)
+    except ApiError as e:
+        await cb.message.answer(f"⚠️ {html.escape(str(e))}")
+
+
 # ---- /learn wizard ----
 @router.message(Command("learn"))
 async def learn_start(msg: Message, state: FSMContext):
+    await state.clear()
+    if not await _require_login(msg, msg.from_user.id, msg.from_user.full_name):
+        return
     await state.set_state(Learn.topic)
     await msg.answer("What do you want to learn? <i>(e.g. PostgreSQL indexing)</i>")
 
@@ -216,6 +337,8 @@ async def learn_goal(msg: Message, state: FSMContext):
 @router.message(Command("courses"))
 async def cmd_courses(msg: Message, state: FSMContext):
     await state.clear()
+    if not await _require_login(msg, msg.from_user.id, msg.from_user.full_name):
+        return
     items = (await api.list_courses(msg.from_user.id))["courses"]
     if not items:
         await msg.answer("You have no courses yet. Use /learn to create one!")
@@ -318,6 +441,8 @@ async def _send_next_review(target, telegram_id):
 @router.message(Command("review"))
 async def cmd_review(msg: Message, state: FSMContext):
     await state.clear()
+    if not await _require_login(msg, msg.from_user.id, msg.from_user.full_name):
+        return
     await _send_next_review(msg, msg.from_user.id)
 
 
@@ -345,6 +470,9 @@ async def cb_review_grade(cb: CallbackQuery):
 # ---- /explore (public catalog) ----
 @router.message(Command("explore"))
 async def cmd_explore(msg: Message, state: FSMContext):
+    await state.clear()
+    if not await _require_login(msg, msg.from_user.id, msg.from_user.full_name):
+        return
     await state.set_state(Explore.query)
     await msg.answer(
         "🔍 Send a topic to search the public catalog, or send "
@@ -408,11 +536,196 @@ async def cmd_login(msg: Message, state: FSMContext):
         return
     if acc.get("emailVerified"):
         await msg.answer(
-            f"✅ You're already linked as <b>{html.escape(acc.get('email') or '')}</b>.\n"
-            "Use /settings to change your email or password."
+            f"✅ You're already logged in as <b>{html.escape(acc.get('email') or '')}</b>.\n"
+            "Use /settings to manage your account, or /signout to log out."
+        )
+        return
+    await msg.answer(
+        "🔑 <b>Log in</b>\nHow would you like to sign in?",
+        reply_markup=login_methods_kb(),
+    )
+
+
+@router.message(Command("signup"))
+async def cmd_signup(msg: Message, state: FSMContext):
+    await state.clear()
+    try:
+        acc = (await api.get_account(msg.from_user.id, msg.from_user.full_name))[
+            "account"
+        ]
+    except ApiError:
+        acc = None
+    if acc and acc.get("emailVerified") and acc.get("hasPassword"):
+        await msg.answer(
+            "✅ You already have an account. Use /settings or /signout."
         )
         return
     await _start_link_email(msg, state)
+
+
+@router.callback_query(F.data == "signup")
+async def cb_signup(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    await _start_link_email(cb.message, state)
+
+
+@router.callback_query(F.data == "loginmenu")
+async def cb_loginmenu(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    await cb.message.answer(
+        "🔑 <b>Log in</b>\nHow would you like to sign in?",
+        reply_markup=login_methods_kb(),
+    )
+
+
+@router.callback_query(F.data == "login:otp")
+async def cb_login_otp(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    await _start_link_email(cb.message, state)
+
+
+@router.callback_query(F.data == "login:pw")
+async def cb_login_pw(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    await state.set_state(LoginPw.email)
+    await cb.message.answer(
+        "🔑 Send the <b>email</b> of your account.\n\nSend /cancel to abort."
+    )
+
+
+@router.message(LoginPw.email, F.text, ~F.text.startswith("/"))
+async def login_pw_email(msg: Message, state: FSMContext):
+    await state.update_data(email=msg.text.strip())
+    await state.set_state(LoginPw.password)
+    await msg.answer(
+        "Now send your <b>password</b>. I'll delete the message right after."
+    )
+
+
+@router.message(LoginPw.password, F.text, ~F.text.startswith("/"))
+async def login_pw_password(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    email = data.get("email") or ""
+    pw = msg.text.strip()
+    await state.clear()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+    try:
+        await api.login_password(msg.from_user.id, email, pw)
+    except ApiError as e:
+        await msg.answer(f"⚠️ {html.escape(str(e))}\n\nTry /login again.")
+        return
+    await msg.answer(
+        f"✅ Logged in as <b>{html.escape(email)}</b>. What would you like to do?",
+        reply_markup=main_menu_kb(),
+    )
+
+
+@router.callback_query(F.data == "forgot")
+async def cb_forgot(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    await state.set_state(Forgot.email)
+    await cb.message.answer(
+        "🔓 <b>Reset password</b>\nSend the email for your account and I'll "
+        "send a reset code.\n\nSend /cancel to abort."
+    )
+
+
+@router.message(Command("forgot"))
+async def cmd_forgot(msg: Message, state: FSMContext):
+    await state.clear()
+    await state.set_state(Forgot.email)
+    await msg.answer(
+        "🔓 <b>Reset password</b>\nSend the email for your account and I'll "
+        "send a reset code.\n\nSend /cancel to abort."
+    )
+
+
+@router.message(Forgot.email, F.text, ~F.text.startswith("/"))
+async def forgot_email(msg: Message, state: FSMContext):
+    email = msg.text.strip()
+    try:
+        await api.forgot_start(email)
+    except ApiError as e:
+        await msg.answer(f"⚠️ {html.escape(str(e))}")
+        return
+    await state.update_data(email=email)
+    await state.set_state(Forgot.code)
+    await msg.answer(
+        f"📨 If an account exists for <b>{html.escape(email)}</b>, a 6-digit "
+        "reset code is on its way.\n\nSend me the code."
+    )
+
+
+@router.message(Forgot.code, F.text, ~F.text.startswith("/"))
+async def forgot_code(msg: Message, state: FSMContext):
+    await state.update_data(code=msg.text.strip())
+    await state.set_state(Forgot.password)
+    await msg.answer(
+        "Now send your <b>new password</b> (min 8 characters). "
+        "I'll delete the message right after."
+    )
+
+
+@router.message(Forgot.password, F.text, ~F.text.startswith("/"))
+async def forgot_password(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    pw = msg.text.strip()
+    await state.clear()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+    try:
+        await api.forgot_reset(data.get("email"), data.get("code"), pw)
+    except ApiError as e:
+        await msg.answer(
+            f"⚠️ {html.escape(str(e))}\n\nStart again with /forgot."
+        )
+        return
+    await msg.answer(
+        "✅ Password reset! You can now log in with your new password.\n\n"
+        "Use /login to sign in.",
+        reply_markup=login_kb(),
+    )
+
+
+@router.message(Command("signout"))
+async def cmd_signout(msg: Message, state: FSMContext):
+    await state.clear()
+    try:
+        await api.signout(msg.from_user.id)
+    except ApiError as e:
+        await msg.answer(f"⚠️ {html.escape(str(e))}")
+        return
+    await msg.answer(
+        "👋 Signed out. Your courses are safe — log back in anytime.\n\n"
+        "Use /login or /signup.",
+        reply_markup=login_kb(),
+    )
+
+
+@router.callback_query(F.data == "signout")
+async def cb_signout(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await state.clear()
+    try:
+        await api.signout(cb.from_user.id)
+    except ApiError as e:
+        await cb.message.answer(f"⚠️ {html.escape(str(e))}")
+        return
+    await cb.message.answer(
+        "👋 Signed out. Your courses are safe — log back in anytime.\n\n"
+        "Use /login or /signup.",
+        reply_markup=login_kb(),
+    )
 
 
 async def _show_settings(target, telegram_id, name):
@@ -467,7 +780,6 @@ async def link_email_code(msg: Message, state: FSMContext):
     except ApiError as e:
         await msg.answer(f"⚠️ {html.escape(str(e))}")
         return
-    await state.clear()
     extra = (
         "\n\nYour Telegram courses were merged with your existing website account."
         if res.get("merged")
@@ -475,6 +787,25 @@ async def link_email_code(msg: Message, state: FSMContext):
     )
     await msg.answer(
         f"✅ Email <b>{html.escape(email)}</b> verified and linked.{extra}"
+    )
+    # A password is mandatory — make sure the account has one.
+    try:
+        acc = await _fetch_account(msg.from_user.id, msg.from_user.full_name)
+    except ApiError:
+        acc = None
+    if not (acc or {}).get("hasPassword"):
+        await state.set_state(Password.new)
+        await state.update_data(signup=True)
+        await msg.answer(
+            "🔒 <b>Last step:</b> set a password (min 8 characters) so you can "
+            "log in with email + password or a one-time code. I'll delete your "
+            "message right after."
+        )
+        return
+    await state.clear()
+    await msg.answer(
+        "🎉 You're all set! What would you like to do?",
+        reply_markup=main_menu_kb(),
     )
 
 
@@ -497,6 +828,7 @@ async def cb_setpw(cb: CallbackQuery, state: FSMContext):
         )
     else:
         await state.set_state(Password.new)
+        await state.update_data(signup=True)
         await cb.message.answer(
             "Send a <b>new</b> password (min 8 characters). I'll delete the message "
             "right after. Send /cancel to abort."
@@ -529,7 +861,17 @@ async def pw_new(msg: Message, state: FSMContext):
     except ApiError as e:
         await msg.answer(f"⚠️ {html.escape(str(e))}")
         return
-    await msg.answer("✅ Password updated. Your message was deleted for safety.")
+    if data.get("signup"):
+        await msg.answer(
+            "🎉 <b>Account ready!</b> Your password is set. "
+            "What would you like to do?",
+            reply_markup=main_menu_kb(),
+        )
+    else:
+        await msg.answer(
+            "✅ Password updated. Your message was deleted for safety.",
+            reply_markup=main_menu_kb(),
+        )
 
 
 # ---- BYOK keys ----

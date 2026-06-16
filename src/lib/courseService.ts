@@ -30,6 +30,28 @@ export async function resolveTelegramUser(
   return user.id;
 }
 
+/**
+ * Like resolveTelegramUser, but requires the account to be "logged in" from
+ * Telegram (verified email) and not banned. Use this to gate every action that
+ * consumes resources or creates data. New accounts still inherit the default
+ * daily limit (dailyGenLimit is null => HOUSE_DAILY_LIMIT).
+ */
+export async function requireVerifiedTelegramUser(
+  telegramId: string,
+  name?: string,
+): Promise<string> {
+  const userId = await resolveTelegramUser(telegramId, name);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new ServiceError("Account not found", 404);
+  if (user.banned) throw new ServiceError("This account is banned.", 403);
+  if (!user.emailVerified)
+    throw new ServiceError(
+      "\uD83D\uDD12 Please verify your email first. Open the bot and tap /login to get started.",
+      403,
+    );
+  return userId;
+}
+
 export async function generateCourse(userId: string, req: GenerateRequest) {
   const { topic, level, goal } = req;
 
