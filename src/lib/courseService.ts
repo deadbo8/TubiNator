@@ -4,10 +4,12 @@
 import { prisma } from "@/lib/prisma";
 import { encryptSecret } from "@/lib/crypto";
 import { resolveKey, consumeHouseGeneration, Provider } from "@/lib/keys";
-import { generateCourseOutline, pickBestVideoIndex } from "@/lib/groq";
+import { generateCourseOutline, pickBestVideoWithComments } from "@/lib/groq";
 import {
   searchCandidates,
   relevanceScore,
+  instructionalScore,
+  fetchTopComments,
   type RankedVideo,
 } from "@/lib/youtube";
 import { GenerateRequest } from "@/types/course";
@@ -203,7 +205,7 @@ export async function fetchLessonVideo(userId: string, lessonId: string) {
   let pool = candidates.filter((c) => !usedIds.has(c.youtubeId));
   if (pool.length === 0) pool = candidates; // nothing fresh left; allow reuse
 
-  const chosen = await selectBestVideo(userId, course.topic, lesson, pool);
+  const chosen = await selectBestVideo(userId, course.topic, lesson, pool, ytKey.key);
   if (!chosen) throw new ServiceError("No suitable video found", 404);
 
   const video = await prisma.video.upsert({
@@ -280,28 +282,10 @@ async function selectBestVideo(
   topic: string,
   lesson: { title: string; description: string; youtubeQuery: string },
   pool: RankedVideo[],
+  ytApiKey: string,
 ): Promise<RankedVideo | null> {
   if (pool.length === 0) return null;
   if (pool.length === 1) return pool[0];
-
-  const groqKey = await resolveKey(userId, "groq");
-  if (groqKey) {
-    try {
-      const idx = await pickBestVideoIndex(
-        groqKey.key,
-        { title: lesson.title, description: lesson.description, topic },
-        pool.map((c) => ({
-          title: c.title,
-          channelName: c.channelName,
-          description: c.description,
-          duration: c.duration,
-        })),
-      );
-      if (idx >= 0 && idx < pool.length) return pool[idx];
-    } catch {
-      // fall through to algorithmic ranking
-    }
-  }
 
   const keywords = buildKeywords(
     topic,
@@ -310,17 +294,63 @@ async function selectBestVideo(
     lesson.youtubeQuery,
   );
   const popular = (v: RankedVideo) =>
-    Math.log10((v.viewCount || 0) + 1) * 2 + Math.log10((v.likeCount || 0) + 1);
+    Math.log10((v.viewCount || 0) + 1) * 2 +
+    Math.log10((v.likeCount || 0) + 1) +
+    Math.log10((v.commentCount || 0) + 1) * 0.5;
   const scored = pool.map((v) => ({
     v,
     rel: relevanceScore(v, keywords),
+    instr: instructionalScore(v),
     pop: popular(v),
   }));
-  // Relevance filter: if any candidate matches the lesson, drop the off-topic ones.
-  const relevant = scored.filter((s) => s.rel > 0);
-  const finalPool = relevant.length > 0 ? relevant : scored;
-  finalPool.sort((a, b) => b.rel * 3 + b.pop - (a.rel * 3 + a.pop));
-  return finalPool[0]?.v ?? null;
+  // Prefer videos that are BOTH on-topic and look instructional (not
+  // novelty/news/comedy), so a keyword-matching viral clip can't win on
+  // popularity alone. Relax the filters only if nothing qualifies.
+  let ranked = scored.filter((s) => s.rel > 0 && s.instr >= 0);
+  if (ranked.length === 0) ranked = scored.filter((s) => s.rel > 0);
+  if (ranked.length === 0) ranked = scored.filter((s) => s.instr >= 0);
+  if (ranked.length === 0) ranked = scored;
+  const rank = (s: { rel: number; instr: number; pop: number }) =>
+    s.rel * 3 + s.instr * 3 + s.pop * 0.5;
+  ranked.sort((a, b) => rank(b) - rank(a));
+
+  // Take the strongest few, then let an LLM judge read each one's top ~80
+  // viewer comments to choose the best-aligned, genuinely instructional video.
+  // Comments are strong evidence of whether viewers actually learned from it.
+  const shortlist = ranked.slice(0, 3).map((s) => s.v);
+  const groqKey = await resolveKey(userId, "groq");
+  if (groqKey && shortlist.length > 1) {
+    try {
+      const withComments = await Promise.all(
+        shortlist.map(async (v) => ({
+          title: v.title,
+          channelName: v.channelName,
+          description: v.description,
+          duration: v.duration,
+          comments: await fetchTopComments(ytApiKey, v.youtubeId, 80),
+        })),
+      );
+      const idx = await pickBestVideoWithComments(
+        groqKey.key,
+        { title: lesson.title, description: lesson.description, topic },
+        withComments,
+      );
+      if (idx >= 0 && idx < shortlist.length) {
+        const pick = shortlist[idx];
+        // Trust the judge unless its pick is clearly non-instructional and a
+        // better instructional candidate exists in the shortlist.
+        if (instructionalScore(pick) >= 0) return pick;
+        const betterExists = shortlist.some(
+          (c) => c !== pick && instructionalScore(c) >= 0,
+        );
+        if (!betterExists) return pick;
+      }
+    } catch {
+      // fall through to algorithmic ranking
+    }
+  }
+
+  return ranked[0]?.v ?? null;
 }
 
 export async function setProgress(
@@ -429,7 +459,7 @@ export async function repickLessonVideo(userId: string, lessonId: string) {
     pool = candidates.filter((c) => c.youtubeId !== currentId);
   if (pool.length === 0) throw new ServiceError("No other video found", 404);
 
-  const chosen = await selectBestVideo(userId, course.topic, lesson, pool);
+  const chosen = await selectBestVideo(userId, course.topic, lesson, pool, ytKey.key);
   if (!chosen) throw new ServiceError("No other video found", 404);
 
   const video = await prisma.video.upsert({

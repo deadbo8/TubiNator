@@ -145,7 +145,59 @@ export async function pickBestVideoIndex(
         `[${i}] "${c.title}" - ${c.channelName} (${Math.round(c.duration / 60)} min)\n    ${c.description.slice(0, 280).replace(/\s+/g, " ")}`,
     )
     .join("\n");
-  const sys = `You match a YouTube video to a course lesson. Choose the single candidate that best TEACHES this lesson's specific content and is clearly on-topic and good quality. Judge from each candidate's title and description. Return STRICT JSON only: {"index": <number>}. If none are relevant, return {"index": -1}.`;
+  const sys = `You match a YouTube video to a course lesson. Choose the single candidate that best TEACHES this lesson's specific skill: it MUST be an instructional / educational / tutorial / how-to / explainer video that a learner would genuinely learn the skill from. REJECT (never choose) entertainment, comedy, novelty or "funny"/"amazing"/viral clips, news reports, reactions, compilations, music videos, vlogs, trailers, or any video that merely MENTIONS the keywords without actually teaching them. A clip that matches the lesson keywords but is not genuinely instructional is NOT relevant. Judge from each candidate's title and description. Return STRICT JSON only: {"index": <number>}. If none are genuinely instructional and on-topic, return {"index": -1}.`;
+  const user = `Course topic: ${lesson.topic}\nLesson: ${lesson.title}\nWhat it should teach: ${lesson.description}\n\nCandidates:\n${list}\n\nReturn the JSON now.`;
+  try {
+    const raw = await completeJSON(
+      groq,
+      model,
+      [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+      0.1,
+    );
+    const idx = Number((JSON.parse(raw) as { index?: unknown }).index);
+    if (Number.isInteger(idx) && idx >= 0 && idx < candidates.length) return idx;
+  } catch {
+    // ignore
+  }
+  return -1;
+}
+
+export type VideoCandidateWithComments = VideoCandidate & {
+  comments: string[];
+};
+
+/**
+ * Like pickBestVideoIndex, but also feeds each candidate's top viewer comments
+ * to the model so it can judge real-world quality and course alignment (did
+ * viewers actually learn from it? is it accurate / on-topic / not novelty?).
+ * Returns the chosen index, or -1 to fall back to algorithmic ranking.
+ */
+export async function pickBestVideoWithComments(
+  apiKey: string,
+  lesson: { title: string; description: string; topic: string },
+  candidates: VideoCandidateWithComments[],
+): Promise<number> {
+  if (candidates.length === 0) return -1;
+  const groq = new Groq({ apiKey });
+  const model = getModel();
+  const list = candidates
+    .map((c, i) => {
+      const comments =
+        c.comments.length > 0
+          ? c.comments
+              .slice(0, 80)
+              .map((t) => `      - ${t.replace(/\s+/g, " ").slice(0, 200)}`)
+              .join("\n")
+          : "      (comments unavailable)";
+      return `[${i}] "${c.title}" - ${c.channelName} (${Math.round(
+        c.duration / 60,
+      )} min)\n    Description: ${c.description.slice(0, 280).replace(/\s+/g, " ")}\n    Top viewer comments:\n${comments}`;
+    })
+    .join("\n\n");
+  const sys = `You pick the YouTube video that best TEACHES a course lesson, using its title, description, AND what real viewers say in the comments. The chosen video MUST be genuinely instructional/educational for this lesson's specific skill. Use the comments as evidence of quality and alignment: PREFER videos whose commenters indicate it was clear, accurate, and helped them actually learn the topic; REJECT videos whose comments suggest it is entertainment/novelty/off-topic, inaccurate, misleading, outdated, low quality, or that viewers found unhelpful for learning. Return STRICT JSON only: {"index": <number>}. If none are genuinely instructional and well-reviewed for this lesson, return {"index": -1}.`;
   const user = `Course topic: ${lesson.topic}\nLesson: ${lesson.title}\nWhat it should teach: ${lesson.description}\n\nCandidates:\n${list}\n\nReturn the JSON now.`;
   try {
     const raw = await completeJSON(

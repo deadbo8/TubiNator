@@ -11,6 +11,7 @@ export type RankedVideo = {
   duration: number; // seconds
   viewCount: number;
   likeCount: number;
+  commentCount: number;
 };
 
 function parseISODuration(iso: string): number {
@@ -23,7 +24,9 @@ function parseISODuration(iso: string): number {
 }
 
 const popularity = (v: RankedVideo) =>
-  Math.log10(v.viewCount + 1) * 2 + Math.log10(v.likeCount + 1);
+  Math.log10(v.viewCount + 1) * 2 +
+  Math.log10(v.likeCount + 1) +
+  Math.log10(v.commentCount + 1) * 0.5;
 
 /**
  * Search YouTube and return a ranked list of candidate videos (most popular
@@ -83,6 +86,7 @@ export async function searchCandidates(
     duration: parseISODuration(it.contentDetails?.duration ?? "PT0S"),
     viewCount: parseInt(it.statistics?.viewCount ?? "0", 10),
     likeCount: parseInt(it.statistics?.likeCount ?? "0", 10),
+    commentCount: parseInt(it.statistics?.commentCount ?? "0", 10),
   }));
 
   const filtered = candidates.filter(
@@ -115,4 +119,89 @@ export function relevanceScore(v: RankedVideo, keywords: string[]): number {
   let hits = 0;
   for (const k of keywords) if (hay.includes(k)) hits++;
   return hits / keywords.length;
+}
+
+// Words that signal a video actually teaches something.
+const INSTRUCTIONAL_MARKERS = [
+  "tutorial", "how to", "how-to", "guide", "lesson", "course", "learn",
+  "explained", "step by step", "step-by-step", "beginner", "beginners",
+  "basics", "fundamentals", "demonstration", "masterclass", "training",
+  "walkthrough", "technique", "instructional", "explainer", "crash course",
+  "full course", "teaches",
+];
+
+// Words that signal entertainment / novelty / news rather than instruction.
+const ENTERTAINMENT_MARKERS = [
+  "funny", "hilarious", "prank", "reaction", "compilation", "fails",
+  "amazing animals", "cute", "shocking", "you won't believe",
+  "you wont believe", "meme", "comedy", "satire", "music video", "cartoon",
+  "gone wrong", "celebrity", "trailer", "tv show", "sketch", "skit",
+  "vlog", "#shorts", "caught on camera", "goes viral", "viral video",
+  "talented", "try not to", "news agency", "catersnews", "licensed from",
+];
+
+/**
+ * Heuristic in the range -1..+1 for whether a video is instructional
+ * (positive) versus entertainment/novelty/news (negative). Used to keep
+ * keyword-matching but non-teaching clips (e.g. a viral "ponies do CPR" video)
+ * from beating real tutorials.
+ */
+export function instructionalScore(v: RankedVideo): number {
+  const hay =
+    `${v.title} ${v.description} ${v.channelName} ${(v.tags || []).join(" ")}`.toLowerCase();
+  let score = 0;
+  for (const m of INSTRUCTIONAL_MARKERS) if (hay.includes(m)) score += 0.34;
+  for (const m of ENTERTAINMENT_MARKERS) if (hay.includes(m)) score -= 0.5;
+  const title = v.title.toLowerCase();
+  if (/\b(how to|tutorial|step by step|guide|explained|lesson)\b/.test(title))
+    score += 0.4;
+  if (
+    /\b(funny|hilarious|amazing|prank|reaction|compilation|gone wrong|talented|viral)\b/.test(
+      title,
+    )
+  )
+    score -= 0.6;
+  return Math.max(-1, Math.min(1, score));
+}
+
+/**
+ * Fetch up to `max` top (most relevant) comments for a video. Costs 1 quota
+ * unit. Returns [] if comments are disabled or the call fails, so callers can
+ * degrade gracefully.
+ */
+export async function fetchTopComments(
+  apiKey: string,
+  youtubeId: string,
+  max = 80,
+): Promise<string[]> {
+  const url = new URL("https://www.googleapis.com/youtube/v3/commentThreads");
+  url.searchParams.set("part", "snippet");
+  url.searchParams.set("videoId", youtubeId);
+  url.searchParams.set("order", "relevance");
+  url.searchParams.set("maxResults", String(Math.min(Math.max(max, 1), 100)));
+  url.searchParams.set("textFormat", "plainText");
+  url.searchParams.set("key", apiKey);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    return [];
+  }
+  if (!res.ok) return []; // comments disabled / not found / quota
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    return [];
+  }
+  return (data.items || [])
+    .map(
+      (it: any) =>
+        it.snippet?.topLevelComment?.snippet?.textDisplay as
+          | string
+          | undefined,
+    )
+    .filter((t: unknown): t is string => typeof t === "string" && t.length > 0)
+    .map((t: string) => t.replace(/\s+/g, " ").trim())
+    .slice(0, max);
 }

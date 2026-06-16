@@ -30,7 +30,7 @@ export async function resolveKey(
   return null;
 }
 
-const HOUSE_DAILY_LIMIT = parseInt(process.env.HOUSE_DAILY_LIMIT || "5", 10);
+const HOUSE_DAILY_LIMIT = parseInt(process.env.HOUSE_DAILY_LIMIT || "2", 10);
 
 /**
  * Enforce the house-key daily generation cap. Users running on their own key
