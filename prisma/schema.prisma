@@ -19,10 +19,13 @@ model User {
   youtubeApiKey   String?      // encrypted, BYOK
   dailyGenCount   Int          @default(0)  // house-key rate limiting
   dailyGenResetAt DateTime?
+  dailyGenLimit   Int?         // per-user override of the house daily limit (admin-set)
+  banned          Boolean      @default(false)
   accounts        Account[]
   courses         Course[]     // courses this user authored
   enrollments     Enrollment[]
   progress        Progress[]
+  notes           Note[]
   createdAt       DateTime     @default(now())
 }
 
@@ -90,6 +93,7 @@ model Lesson {
   moduleId     String
   module       Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   progress     Progress[]
+  notes        Note[]
 }
 
 model Video {
@@ -114,4 +118,31 @@ model Progress {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, lessonId])
+}
+
+// Per-user notes attached to a lesson (a lesson maps to one video).
+model Note {
+  id        String   @id @default(cuid())
+  userId    String
+  lessonId  String
+  content   String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, lessonId])
+}
+
+// Short-lived one-time codes for email verification and passwordless login.
+model EmailOtp {
+  id        String   @id @default(cuid())
+  email     String
+  codeHash  String
+  purpose   String   // "verify" | "login"
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email, purpose])
 }

@@ -3,7 +3,6 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { SignOutButton } from "@/components/sign-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -40,10 +39,6 @@ export default async function Dashboard() {
           <Link href="/generate">
             <Button>+ New course</Button>
           </Link>
-          <Link href="/settings">
-            <Button variant="outline">Settings</Button>
-          </Link>
-          <SignOutButton />
         </div>
       </header>
 

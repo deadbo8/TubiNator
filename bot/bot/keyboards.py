@@ -41,22 +41,86 @@ def course_kb(course) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def settings_kb() -> InlineKeyboardMarkup:
+def settings_kb(account) -> InlineKeyboardMarkup:
+    """Settings menu mirroring the website: email, password, and BYOK keys."""
+    rows = []
+    if account.get("emailVerified"):
+        pw_label = "🔒 Change password" if account.get("hasPassword") else "🔒 Set password"
+        rows.append([InlineKeyboardButton(text=pw_label, callback_data="setpw")])
+    else:
+        rows.append(
+            [InlineKeyboardButton(text="✉️ Link & verify email", callback_data="linkemail")]
+        )
+    groq_label = (
+        "🔑 Update Groq key" if account.get("usingOwnGroq") else "🔑 Add Groq key"
+    )
+    yt_label = (
+        "🔑 Update YouTube key"
+        if account.get("usingOwnYoutube")
+        else "🔑 Add YouTube key"
+    )
+    rows.append([InlineKeyboardButton(text=groq_label, callback_data="setkey:groq")])
+    rows.append([InlineKeyboardButton(text=yt_label, callback_data="setkey:youtube")])
+    clear_row = []
+    if account.get("usingOwnGroq"):
+        clear_row.append(
+            InlineKeyboardButton(text="🗑 Clear Groq", callback_data="clearkey:groq")
+        )
+    if account.get("usingOwnYoutube"):
+        clear_row.append(
+            InlineKeyboardButton(text="🗑 Clear YouTube", callback_data="clearkey:youtube")
+        )
+    if clear_row:
+        rows.append(clear_row)
+    if account.get("isAdmin"):
+        rows.append(
+            [InlineKeyboardButton(text="🛡 Admin panel", callback_data="admin")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_users_kb(users) -> InlineKeyboardMarkup:
+    """One row per user; tap to open that user's management actions."""
+    rows = []
+    for u in users:
+        flags = ""
+        if u.get("banned"):
+            flags += " 🚫"
+        if u.get("isAdmin"):
+            flags += " ⭐"
+        label = (u.get("email") or u.get("name") or "(no email)") + flags
+        rows.append(
+            [InlineKeyboardButton(text=label[:60], callback_data=f"au:{u['id']}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_user_actions_kb(user) -> InlineKeyboardMarkup:
+    uid = user["id"]
+    banned = user.get("banned")
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="✅ Unban" if banned else "🚫 Ban",
+                callback_data=f"a{'unban' if banned else 'ban'}:{uid}",
+            )
+        ],
+        [InlineKeyboardButton(text="🎚 Set daily limit", callback_data=f"alim:{uid}")],
+        [InlineKeyboardButton(text="♻️ Reset limit to default", callback_data=f"alimdef:{uid}")],
+        [InlineKeyboardButton(text="🗑 Delete account", callback_data=f"adel:{uid}")],
+        [InlineKeyboardButton(text="⬅️ Back to list", callback_data="admin")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_delete_confirm_kb(uid) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔑 Set Groq key", callback_data="setkey:groq")],
             [
                 InlineKeyboardButton(
-                    text="🔑 Set YouTube key", callback_data="setkey:youtube"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🗑 Clear Groq", callback_data="clearkey:groq"
+                    text="☠️ Yes, delete", callback_data=f"adelyes:{uid}"
                 ),
-                InlineKeyboardButton(
-                    text="🗑 Clear YouTube", callback_data="clearkey:youtube"
-                ),
-            ],
+                InlineKeyboardButton(text="Cancel", callback_data=f"au:{uid}"),
+            ]
         ]
     )

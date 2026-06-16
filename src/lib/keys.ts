@@ -44,6 +44,10 @@ export async function consumeHouseGeneration(
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return { allowed: false, remaining: 0 };
+  if (user.banned) return { allowed: false, remaining: 0 };
+
+  // An admin-set per-user override takes precedence over the global house limit.
+  const limit = user.dailyGenLimit ?? HOUSE_DAILY_LIMIT;
 
   const now = new Date();
   const dayMs = 24 * 60 * 60 * 1000;
@@ -52,7 +56,7 @@ export async function consumeHouseGeneration(
     now.getTime() - user.dailyGenResetAt.getTime() > dayMs;
   const currentCount = needsReset ? 0 : user.dailyGenCount;
 
-  if (currentCount >= HOUSE_DAILY_LIMIT) {
+  if (currentCount >= limit) {
     return { allowed: false, remaining: 0 };
   }
 
@@ -64,5 +68,5 @@ export async function consumeHouseGeneration(
     },
   });
 
-  return { allowed: true, remaining: HOUSE_DAILY_LIMIT - (currentCount + 1) };
+  return { allowed: true, remaining: limit - (currentCount + 1) };
 }

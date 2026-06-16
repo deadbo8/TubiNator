@@ -16,6 +16,7 @@ export const authConfig = {
         "/generate",
         "/courses",
         "/settings",
+        "/admin",
       ];
       const isProtected = protectedPaths.some((p) =>
         nextUrl.pathname.startsWith(p),

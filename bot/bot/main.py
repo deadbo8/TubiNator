@@ -30,7 +30,9 @@ async def main():
         [
             BotCommand(command="learn", description="Create a new course"),
             BotCommand(command="courses", description="View your courses"),
-            BotCommand(command="settings", description="Manage your API keys"),
+            BotCommand(command="me", description="Your account & usage"),
+            BotCommand(command="settings", description="Email, password & API keys"),
+            BotCommand(command="admin", description="Admin panel (admins only)"),
             BotCommand(command="help", description="How to use the bot"),
         ]
     )

@@ -37,6 +37,7 @@ async def _request(method: str, path: str, **kwargs):
         return data
 
 
+# ---- Courses ----
 async def generate_course(telegram_id, name, topic, level, goal):
     return await _request(
         "POST",
@@ -81,6 +82,7 @@ async def set_progress(telegram_id, lesson_id, completed):
     )
 
 
+# ---- Keys (BYOK) ----
 async def set_key(telegram_id, provider, value):
     return await _request(
         "POST",
@@ -90,6 +92,66 @@ async def set_key(telegram_id, provider, value):
             "provider": provider,
             "value": value,
         },
+    )
+
+
+# ---- Account / settings ----
+async def get_account(telegram_id, name=None):
+    params = {"telegramId": str(telegram_id)}
+    if name:
+        params["name"] = name
+    return await _request("GET", "/api/bot/account", params=params)
+
+
+async def link_start(telegram_id, email):
+    return await _request(
+        "POST",
+        "/api/bot/link/start",
+        json={"telegramId": str(telegram_id), "email": email},
+    )
+
+
+async def link_confirm(telegram_id, email, code):
+    return await _request(
+        "POST",
+        "/api/bot/link/confirm",
+        json={"telegramId": str(telegram_id), "email": email, "code": code},
+    )
+
+
+async def set_password(telegram_id, new_password, current_password=None):
+    payload = {
+        "telegramId": str(telegram_id),
+        "newPassword": new_password,
+    }
+    if current_password:
+        payload["currentPassword"] = current_password
+    return await _request("POST", "/api/bot/password", json=payload)
+
+
+# ---- Admin ----
+async def admin_list_users(telegram_id):
+    return await _request(
+        "GET", "/api/bot/admin/users", params={"telegramId": str(telegram_id)}
+    )
+
+
+async def admin_update_user(telegram_id, target_id, *, daily_limit=..., banned=...):
+    payload = {"telegramId": str(telegram_id)}
+    if daily_limit is not ...:
+        payload["dailyGenLimit"] = daily_limit
+    if banned is not ...:
+        payload["banned"] = banned
+    return await _request(
+        "PATCH", f"/api/bot/admin/users/{target_id}", json=payload
+    )
+
+
+async def admin_delete_user(telegram_id, target_id):
+    return await _request(
+        "DELETE",
+        f"/api/bot/admin/users/{target_id}",
+        params={"telegramId": str(telegram_id)},
     )
 
 
