@@ -36,7 +36,9 @@ export default function RegisterPage() {
       setError(data.error || "Registration failed");
       return;
     }
-    setInfo(`We sent a 6-digit code to ${email}.`);
+    setInfo(
+      `We sent a 6-digit code to ${email}. If you don't see it within a minute, check your spam or junk folder.`,
+    );
     setStep("verify");
   }
 

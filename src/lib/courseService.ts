@@ -122,6 +122,130 @@ export async function generateCourse(userId: string, req: GenerateRequest) {
   return { courseId: course.id, cached: false, remaining: gate.remaining };
 }
 
+const LEVEL_ORDER = ["Beginner", "Intermediate", "Advanced"] as const;
+type Level = (typeof LEVEL_ORDER)[number];
+
+/** The level a learner should progress to after `level`, or null if maxed out. */
+export function nextLevel(level: string): Level | null {
+  const i = LEVEL_ORDER.indexOf(level as Level);
+  if (i === -1 || i >= LEVEL_ORDER.length - 1) return null;
+  return LEVEL_ORDER[i + 1];
+}
+
+/**
+ * Generate (or reuse) the next-level course in a learning journey, building on
+ * the modules/lessons of the course the learner just finished. Beginner ->
+ * Intermediate -> Advanced. The new course shares the same topic + goal so it
+ * slots into the global cache and reads as one continuous curriculum.
+ */
+export async function generateNextLevelCourse(
+  userId: string,
+  courseId: string,
+) {
+  const current = await prisma.course.findUnique({
+    where: { id: courseId },
+    include: {
+      modules: {
+        orderBy: { order: "asc" },
+        include: { lessons: { orderBy: { order: "asc" } } },
+      },
+    },
+  });
+  if (!current) throw new ServiceError("Course not found", 404);
+
+  const next = nextLevel(current.level);
+  if (!next)
+    throw new ServiceError(
+      "You're already at the most advanced level for this course.",
+      400,
+    );
+
+  // Reuse an existing next-level course if one was already generated.
+  const cached = await prisma.course.findUnique({
+    where: {
+      topic_level_goal: {
+        topic: current.topic,
+        level: next,
+        goal: current.goal,
+      },
+    },
+  });
+  if (cached) {
+    await prisma.enrollment.upsert({
+      where: { userId_courseId: { userId, courseId: cached.id } },
+      update: {},
+      create: { userId, courseId: cached.id },
+    });
+    return { courseId: cached.id, cached: true, level: next };
+  }
+
+  const groqKey = await resolveKey(userId, "groq");
+  if (!groqKey) throw new ServiceError("No Groq API key configured", 400);
+
+  const gate = await consumeHouseGeneration(userId, groqKey.source === "user");
+  if (!gate.allowed) {
+    throw new ServiceError(
+      "Daily free generation limit reached. Add your own Groq API key with /settings for unlimited generations.",
+      429,
+    );
+  }
+
+  // Summarise the completed course so the model can build on it (not repeat it).
+  const priorOutline = current.modules
+    .map(
+      (m, mi) =>
+        `${mi + 1}. ${m.title}\n` +
+        m.lessons.map((l) => `   - ${l.title}`).join("\n"),
+    )
+    .join("\n");
+
+  let outline;
+  try {
+    outline = await generateCourseOutline(
+      groqKey.key,
+      { topic: current.topic, level: next, goal: current.goal },
+      { previousLevel: current.level, outline: priorOutline },
+    );
+  } catch (e) {
+    throw new ServiceError(
+      e instanceof Error ? e.message : "Generation failed",
+      502,
+    );
+  }
+
+  const course = await prisma.course.create({
+    data: {
+      title: outline.title,
+      topic: current.topic,
+      level: next,
+      goal: current.goal,
+      authorId: userId,
+      modules: {
+        create: outline.modules.map((m, mi) => ({
+          title: m.title,
+          order: mi,
+          lessons: {
+            create: m.lessons.map((l, li) => ({
+              title: l.title,
+              description: l.description,
+              youtubeQuery: l.searchQuery,
+              order: li,
+            })),
+          },
+        })),
+      },
+    },
+  });
+
+  await prisma.enrollment.create({ data: { userId, courseId: course.id } });
+  return {
+    courseId: course.id,
+    cached: false,
+    level: next,
+    remaining: gate.remaining,
+  };
+}
+
 export async function listEnrollments(userId: string) {
   const enrollments = await prisma.enrollment.findMany({
     where: { userId },

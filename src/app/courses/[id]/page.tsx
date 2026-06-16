@@ -7,6 +7,11 @@ import { LessonItem } from "@/components/lesson-item";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
+const NEXT_LEVEL: Record<string, string> = {
+  Beginner: "Intermediate",
+  Intermediate: "Advanced",
+};
+
 export default function CoursePage({ params }: { params: { id: string } }) {
   const { id } = params;
   const router = useRouter();
@@ -17,6 +22,7 @@ export default function CoursePage({ params }: { params: { id: string } }) {
   const [slug, setSlug] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
 
   useEffect(() => {
     fetch(`/api/courses/${id}`)
@@ -68,6 +74,16 @@ export default function CoursePage({ params }: { params: { id: string } }) {
     setBusy(false);
     if (res?.ok) router.push("/dashboard");
     else alert(res?.error || "Could not delete course");
+  }
+
+  async function goToNextLevel() {
+    setAdvancing(true);
+    const res = await fetch(`/api/courses/${id}/next-level`, { method: "POST" })
+      .then((r) => r.json())
+      .catch(() => null);
+    setAdvancing(false);
+    if (res && res.courseId) router.push(`/courses/${res.courseId}`);
+    else alert(res?.error || "Could not start the next level");
   }
 
   if (loading)
@@ -141,6 +157,25 @@ export default function CoursePage({ params }: { params: { id: string } }) {
           </section>
         ))}
       </div>
+
+      {course && NEXT_LEVEL[course.level] && (
+        <Card className="mt-10">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-medium">🚀 Ready for the next level?</p>
+              <p className="text-sm text-white/50">
+                Continue your journey with a {NEXT_LEVEL[course.level]} course
+                that builds directly on what you just learned here.
+              </p>
+            </div>
+            <Button onClick={goToNextLevel} disabled={advancing}>
+              {advancing
+                ? "Building your course..."
+                : `Continue to ${NEXT_LEVEL[course.level]} \u2192`}
+            </Button>
+          </div>
+        </Card>
+      )}
     </main>
   );
 }

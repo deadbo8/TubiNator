@@ -71,10 +71,14 @@ function dedupeQueries(outline: CourseOutline): CourseOutline {
 export async function generateCourseOutline(
   apiKey: string,
   req: GenerateRequest,
+  prior?: { previousLevel: string; outline: string },
 ): Promise<CourseOutline> {
   const groq = new Groq({ apiKey });
   const model = getModel();
-  const userMsg = `Topic: ${req.topic}\nLevel: ${req.level}\nGoal: ${req.goal}\n\nReturn the JSON course outline now.`;
+  const priorBlock = prior
+    ? `\n\nThis course is the NEXT step for a learner who has ALREADY COMPLETED the ${prior.previousLevel}-level course shown below. Build directly on it:\n- Assume the learner has mastered everything in that course; do NOT re-teach or restate any of those lessons.\n- Advance to genuinely ${req.level} sub-skills that extend and deepen that foundation.\n- Make this read as the natural continuation of one structured journey, picking up exactly where the previous course left off.\n\nAlready-completed ${prior.previousLevel} course:\n${prior.outline}`
+    : "";
+  const userMsg = `Topic: ${req.topic}\nLevel: ${req.level}\nGoal: ${req.goal}${priorBlock}\n\nReturn the JSON course outline now.`;
 
   // Pass 1: draft.
   const draftRaw = await completeJSON(
@@ -103,7 +107,7 @@ export async function generateCourseOutline(
         { role: "system", content: REFINE_PROMPT },
         {
           role: "user",
-          content: `Topic: ${req.topic}\nLevel: ${req.level}\nGoal: ${req.goal}\n\nDraft outline:\n${draftRaw}\n\nReturn the improved JSON now.`,
+          content: `Topic: ${req.topic}\nLevel: ${req.level}\nGoal: ${req.goal}${priorBlock}\n\nDraft outline:\n${draftRaw}\n\nReturn the improved JSON now.`,
         },
       ],
       0.3,

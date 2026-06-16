@@ -37,7 +37,9 @@ export default function ForgotPasswordPage() {
       return;
     }
     setStep("reset");
-    setInfo(`If an account exists for ${email}, a 6-digit code is on its way.`);
+    setInfo(
+      `If an account exists for ${email}, a 6-digit code is on its way. If you don't see it within a minute, check your spam or junk folder.`,
+    );
   }
 
   async function resetPassword(e: React.FormEvent) {
