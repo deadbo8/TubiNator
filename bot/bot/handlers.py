@@ -35,6 +35,7 @@ HELP_TEXT = (
     "/review – review due lessons (spaced repetition)\n"
     "/explore – browse &amp; add public courses\n"
     "/me – your account, XP &amp; streak\n"
+    "/menu – show the main menu\n"
     "/signup – create a Tubinator account\n"
     "/login – log in (password or email code)\n"
     "/forgot – reset your password\n"
@@ -190,6 +191,7 @@ async def _require_login(target, telegram_id, name=None):
 
 # ---- start / help / cancel ----
 @router.message(CommandStart())
+@router.message(Command("menu"))
 async def cmd_start(msg: Message, state: FSMContext):
     await state.clear()
     try:

@@ -33,6 +33,7 @@ async def main():
             BotCommand(command="review", description="Review due lessons"),
             BotCommand(command="explore", description="Browse public courses"),
             BotCommand(command="me", description="Your account, XP & streak"),
+            BotCommand(command="menu", description="Show the main menu"),
             BotCommand(command="signup", description="Create a Tubinator account"),
             BotCommand(command="login", description="Log in (password or email code)"),
             BotCommand(command="forgot", description="Reset your password"),
