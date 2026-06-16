@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   }
   if (!isEmailConfigured()) {
     return NextResponse.json(
-      { error: "Email service is not configured. Set RESEND_API_KEY." },
+      { error: "Email service is not configured. Set SMTP_USER and SMTP_PASS." },
       { status: 503 },
     );
   }
@@ -25,6 +25,7 @@ export async function POST(req: Request) {
   try {
     await createAndSendOtp(email, parsed.data.purpose);
   } catch (e) {
+    console.error("[otp/start] send failed:", e);
     return NextResponse.json(
       { error: "Could not send the code. Try again later." },
       { status: 502 },

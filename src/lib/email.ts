@@ -1,7 +1,9 @@
-// Minimal Resend email client (no SDK dependency — uses the REST API directly).
-// Configure with RESEND_API_KEY and EMAIL_FROM in your environment.
+// Email client using SMTP (works with Gmail, SendGrid, Brevo, Mailgun, etc.).
+// Configure SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and EMAIL_FROM in your env.
+// For Gmail: SMTP_HOST=smtp.gmail.com, SMTP_PORT=465, SMTP_USER=<your gmail>,
+// SMTP_PASS=<16-char App Password>, EMAIL_FROM="Tubinator <your gmail>".
 
-const RESEND_ENDPOINT = "https://api.resend.com/emails";
+import nodemailer, { type Transporter } from "nodemailer";
 
 export type SendEmailArgs = {
   to: string;
@@ -9,28 +11,34 @@ export type SendEmailArgs = {
   html: string;
 };
 
+const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
+const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+
 export function isEmailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY);
+  return Boolean(SMTP_USER && SMTP_PASS);
+}
+
+let transporter: Transporter | null = null;
+function getTransporter(): Transporter {
+  if (!transporter) {
+    transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465, // true for 465 (SSL), false for 587 (STARTTLS)
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+    });
+  }
+  return transporter;
 }
 
 export async function sendEmail({ to, subject, html }: SendEmailArgs): Promise<void> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM || "Tubinator <onboarding@resend.dev>";
-  if (!apiKey) {
-    throw new Error("Email is not configured (RESEND_API_KEY missing)");
+  if (!isEmailConfigured()) {
+    throw new Error("Email is not configured (SMTP_USER/SMTP_PASS missing)");
   }
-  const res = await fetch(RESEND_ENDPOINT, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ from, to, subject, html }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Resend error ${res.status}: ${detail}`);
-  }
+  const from = process.env.EMAIL_FROM || `Tubinator <${SMTP_USER}>`;
+  await getTransporter().sendMail({ from, to, subject, html });
 }
 
 /** Branded HTML wrapper for a one-time code email. */

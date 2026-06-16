@@ -41,13 +41,14 @@ export async function POST(req: Request) {
   // Send the verification code. If email isn't configured, surface a clear error.
   if (!isEmailConfigured()) {
     return NextResponse.json(
-      { error: "Email service is not configured. Set RESEND_API_KEY." },
+      { error: "Email service is not configured. Set SMTP_USER and SMTP_PASS." },
       { status: 503 },
     );
   }
   try {
     await createAndSendOtp(email, "verify");
   } catch (e) {
+    console.error("[register] verification email failed:", e);
     return NextResponse.json(
       { error: "Could not send verification email. Try again later." },
       { status: 502 },

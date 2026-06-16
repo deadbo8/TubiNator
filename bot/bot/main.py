@@ -33,6 +33,7 @@ async def main():
             BotCommand(command="review", description="Review due lessons"),
             BotCommand(command="explore", description="Browse public courses"),
             BotCommand(command="me", description="Your account, XP & streak"),
+            BotCommand(command="login", description="Link your email / sync with website"),
             BotCommand(command="settings", description="Email, password & API keys"),
             BotCommand(command="admin", description="Admin panel (admins only)"),
             BotCommand(command="help", description="How to use the bot"),

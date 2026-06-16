@@ -31,6 +31,7 @@ HELP_TEXT = (
     "/review – review due lessons (spaced repetition)\n"
     "/explore – browse &amp; add public courses\n"
     "/me – your account, XP &amp; streak\n"
+    "/login – link your email to sync with the website\n"
     "/settings – email, password &amp; API keys\n"
     "/admin – admin panel (admins only)\n"
     "/cancel – abort the current action\n"
@@ -134,7 +135,8 @@ def render_account_text(acc) -> str:
 
 # ---- start / help / cancel ----
 @router.message(CommandStart())
-async def cmd_start(msg: Message):
+async def cmd_start(msg: Message, state: FSMContext):
+    await state.clear()
     await msg.answer(
         "👋 Welcome to <b>Tubinator</b>!\n\n"
         "Tell me what you want to learn and I'll build you a custom course of "
@@ -145,7 +147,8 @@ async def cmd_start(msg: Message):
 
 
 @router.message(Command("help"))
-async def cmd_help(msg: Message):
+async def cmd_help(msg: Message, state: FSMContext):
+    await state.clear()
     await msg.answer(HELP_TEXT)
 
 
@@ -162,7 +165,7 @@ async def learn_start(msg: Message, state: FSMContext):
     await msg.answer("What do you want to learn? <i>(e.g. PostgreSQL indexing)</i>")
 
 
-@router.message(Learn.topic, F.text)
+@router.message(Learn.topic, F.text, ~F.text.startswith("/"))
 async def learn_topic(msg: Message, state: FSMContext):
     await state.update_data(topic=msg.text.strip())
     await state.set_state(Learn.level)
@@ -184,7 +187,7 @@ async def learn_level(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.message(Learn.goal, F.text)
+@router.message(Learn.goal, F.text, ~F.text.startswith("/"))
 async def learn_goal(msg: Message, state: FSMContext):
     data = await state.get_data()
     goal = msg.text.strip()
@@ -211,7 +214,8 @@ async def learn_goal(msg: Message, state: FSMContext):
 
 # ---- /courses ----
 @router.message(Command("courses"))
-async def cmd_courses(msg: Message):
+async def cmd_courses(msg: Message, state: FSMContext):
+    await state.clear()
     items = (await api.list_courses(msg.from_user.id))["courses"]
     if not items:
         await msg.answer("You have no courses yet. Use /learn to create one!")
@@ -273,7 +277,8 @@ async def cb_toggle(cb: CallbackQuery):
 
 # ---- /me ----
 @router.message(Command("me"))
-async def cmd_me(msg: Message):
+async def cmd_me(msg: Message, state: FSMContext):
+    await state.clear()
     try:
         acc = (await api.get_account(msg.from_user.id, msg.from_user.full_name))[
             "account"
@@ -311,7 +316,8 @@ async def _send_next_review(target, telegram_id):
 
 
 @router.message(Command("review"))
-async def cmd_review(msg: Message):
+async def cmd_review(msg: Message, state: FSMContext):
+    await state.clear()
     await _send_next_review(msg, msg.from_user.id)
 
 
@@ -346,7 +352,7 @@ async def cmd_explore(msg: Message, state: FSMContext):
     )
 
 
-@router.message(Explore.query, F.text)
+@router.message(Explore.query, F.text, ~F.text.startswith("/"))
 async def explore_query(msg: Message, state: FSMContext):
     await state.clear()
     q = msg.text.strip()
@@ -380,6 +386,35 @@ async def cb_enroll(cb: CallbackQuery):
 
 
 # ---- /settings ----
+async def _start_link_email(target, state: FSMContext):
+    await state.set_state(LinkEmail.email)
+    await target.answer(
+        "✉️ Send me the email you want to link. I'll send a 6-digit "
+        "verification code to it.\n\nOnce verified you can log in on the "
+        "website with this email, and your courses stay in sync.\n\n"
+        "Send /cancel to abort."
+    )
+
+
+@router.message(Command("login"))
+async def cmd_login(msg: Message, state: FSMContext):
+    await state.clear()
+    try:
+        acc = (await api.get_account(msg.from_user.id, msg.from_user.full_name))[
+            "account"
+        ]
+    except ApiError as e:
+        await msg.answer(f"⚠️ {html.escape(str(e))}")
+        return
+    if acc.get("emailVerified"):
+        await msg.answer(
+            f"✅ You're already linked as <b>{html.escape(acc.get('email') or '')}</b>.\n"
+            "Use /settings to change your email or password."
+        )
+        return
+    await _start_link_email(msg, state)
+
+
 async def _show_settings(target, telegram_id, name):
     acc = (await api.get_account(telegram_id, name))["account"]
     text = (
@@ -392,7 +427,8 @@ async def _show_settings(target, telegram_id, name):
 
 
 @router.message(Command("settings"))
-async def cmd_settings(msg: Message):
+async def cmd_settings(msg: Message, state: FSMContext):
+    await state.clear()
     try:
         await _show_settings(msg, msg.from_user.id, msg.from_user.full_name)
     except ApiError as e:
@@ -402,15 +438,11 @@ async def cmd_settings(msg: Message):
 # ---- Email linking ----
 @router.callback_query(F.data == "linkemail")
 async def cb_linkemail(cb: CallbackQuery, state: FSMContext):
-    await state.set_state(LinkEmail.email)
-    await cb.message.answer(
-        "✉️ Send me the email you want to link. I'll send a 6-digit "
-        "verification code to it.\n\nSend /cancel to abort."
-    )
+    await _start_link_email(cb.message, state)
     await cb.answer()
 
 
-@router.message(LinkEmail.email, F.text)
+@router.message(LinkEmail.email, F.text, ~F.text.startswith("/"))
 async def link_email_value(msg: Message, state: FSMContext):
     email = msg.text.strip()
     try:
@@ -426,7 +458,7 @@ async def link_email_value(msg: Message, state: FSMContext):
     )
 
 
-@router.message(LinkEmail.code, F.text)
+@router.message(LinkEmail.code, F.text, ~F.text.startswith("/"))
 async def link_email_code(msg: Message, state: FSMContext):
     email = (await state.get_data()).get("email")
     code = msg.text.strip()
@@ -472,7 +504,7 @@ async def cb_setpw(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.message(Password.current, F.text)
+@router.message(Password.current, F.text, ~F.text.startswith("/"))
 async def pw_current(msg: Message, state: FSMContext):
     await state.update_data(current=msg.text.strip())
     try:
@@ -483,7 +515,7 @@ async def pw_current(msg: Message, state: FSMContext):
     await msg.answer("Now send your <b>new</b> password (min 8 characters).")
 
 
-@router.message(Password.new, F.text)
+@router.message(Password.new, F.text, ~F.text.startswith("/"))
 async def pw_new(msg: Message, state: FSMContext):
     data = await state.get_data()
     new_pw = msg.text.strip()
@@ -534,7 +566,7 @@ async def cb_clearkey(cb: CallbackQuery):
     )
 
 
-@router.message(Keys.waiting, F.text)
+@router.message(Keys.waiting, F.text, ~F.text.startswith("/"))
 async def keys_value(msg: Message, state: FSMContext):
     provider = (await state.get_data()).get("provider")
     value = msg.text.strip()
@@ -578,7 +610,8 @@ async def _find_user(telegram_id, uid):
 
 
 @router.message(Command("admin"))
-async def cmd_admin(msg: Message):
+async def cmd_admin(msg: Message, state: FSMContext):
+    await state.clear()
     await _show_admin_list(msg, msg.from_user.id)
 
 
@@ -660,7 +693,7 @@ async def cb_admin_limit(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.message(AdminLimit.waiting, F.text)
+@router.message(AdminLimit.waiting, F.text, ~F.text.startswith("/"))
 async def admin_limit_value(msg: Message, state: FSMContext):
     uid = (await state.get_data()).get("target")
     await state.clear()
@@ -696,3 +729,18 @@ async def cb_admin_delete(cb: CallbackQuery):
         reply_markup=admin_delete_confirm_kb(uid),
     )
     await cb.answer()
+
+
+# ---- Fallback: anything no command or active menu handled ----
+@router.message(F.text)
+async def fallback(msg: Message, state: FSMContext):
+    # Only reached when no command and no active-state handler matched.
+    if (await state.get_state()) is not None:
+        return
+    if (msg.text or "").startswith("/"):
+        await msg.answer("🤔 I don't know that command. Tap /help to see what I can do.")
+    else:
+        await msg.answer(
+            "I didn't catch that. Tap /learn to create a course, /explore to "
+            "browse public ones, or /help for everything I can do."
+        )
