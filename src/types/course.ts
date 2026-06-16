@@ -8,12 +8,12 @@ export const LessonSchema = z.object({
 
 export const ModuleSchema = z.object({
   title: z.string().min(1),
-  lessons: z.array(LessonSchema).min(1).max(4),
+  lessons: z.array(LessonSchema).min(1).max(5),
 });
 
 export const CourseOutlineSchema = z.object({
   title: z.string().min(1),
-  modules: z.array(ModuleSchema).min(1).max(5),
+  modules: z.array(ModuleSchema).min(1).max(6),
 });
 
 export type CourseOutline = z.infer<typeof CourseOutlineSchema>;

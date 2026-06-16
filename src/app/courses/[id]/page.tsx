@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { LessonItem } from "@/components/lesson-item";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 export default function CoursePage({ params }: { params: { id: string } }) {
   const { id } = params;
+  const router = useRouter();
   const [course, setCourse] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isAuthor, setIsAuthor] = useState(false);
@@ -52,6 +54,22 @@ export default function CoursePage({ params }: { params: { id: string } }) {
     setTimeout(() => setCopied(false), 1500);
   }
 
+  async function removeCourse() {
+    if (
+      !confirm(
+        "Delete this course permanently? This removes it for everyone and can't be undone.",
+      )
+    )
+      return;
+    setBusy(true);
+    const res = await fetch(`/api/courses/${id}`, { method: "DELETE" })
+      .then((r) => r.json())
+      .catch(() => null);
+    setBusy(false);
+    if (res?.ok) router.push("/dashboard");
+    else alert(res?.error || "Could not delete course");
+  }
+
   if (loading)
     return <main className="p-10 text-center text-white/50">Loading...</main>;
   if (!course)
@@ -94,6 +112,18 @@ export default function CoursePage({ params }: { params: { id: string } }) {
               </Button>
             </div>
           )}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+            <p className="text-sm text-white/50">
+              Delete this course for everyone. This can&apos;t be undone.
+            </p>
+            <button
+              onClick={removeCourse}
+              disabled={busy}
+              className="rounded-xl border border-red-500/30 px-3 py-2 text-sm text-red-400 transition hover:bg-red-500/10 disabled:opacity-50"
+            >
+              Delete course
+            </button>
+          </div>
         </Card>
       )}
 
@@ -105,7 +135,7 @@ export default function CoursePage({ params }: { params: { id: string } }) {
             </h2>
             <div className="space-y-3">
               {m.lessons.map((l: any) => (
-                <LessonItem key={l.id} lesson={l} />
+                <LessonItem key={l.id} lesson={l} canManage={isAuthor} />
               ))}
             </div>
           </section>

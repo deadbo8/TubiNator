@@ -1,11 +1,13 @@
 // YouTube Data API v3 helpers with a quota-aware two-step lookup:
 //   1. search.list  (100 units) -> candidate video IDs
-//   2. videos.list  (1 unit, batched) -> duration + statistics for ranking
+//   2. videos.list  (1 unit, batched) -> snippet + duration + stats for ranking
 
 export type RankedVideo = {
   youtubeId: string;
   title: string;
   channelName: string;
+  description: string;
+  tags: string[];
   duration: number; // seconds
   viewCount: number;
   likeCount: number;
@@ -20,20 +22,29 @@ function parseISODuration(iso: string): number {
   return h * 3600 + min * 60 + s;
 }
 
-export async function searchAndRank(
+const popularity = (v: RankedVideo) =>
+  Math.log10(v.viewCount + 1) * 2 + Math.log10(v.likeCount + 1);
+
+/**
+ * Search YouTube and return a ranked list of candidate videos (most popular
+ * first), each including its description + tags so callers can judge relevance
+ * and avoid reusing the same video across lessons.
+ */
+export async function searchCandidates(
   apiKey: string,
   query: string,
-  opts: { minSeconds?: number; maxSeconds?: number } = {},
-): Promise<RankedVideo | null> {
+  opts: { minSeconds?: number; maxSeconds?: number; limit?: number } = {},
+): Promise<RankedVideo[]> {
   const minSeconds = opts.minSeconds ?? 120; // skip very short clips
   const maxSeconds = opts.maxSeconds ?? 5400; // skip multi-hour streams
+  const limit = opts.limit ?? 12;
 
   // Step 1: search.list (100 units)
   const searchUrl = new URL("https://www.googleapis.com/youtube/v3/search");
   searchUrl.searchParams.set("part", "snippet");
   searchUrl.searchParams.set("q", query);
   searchUrl.searchParams.set("type", "video");
-  searchUrl.searchParams.set("maxResults", "10");
+  searchUrl.searchParams.set("maxResults", "15");
   searchUrl.searchParams.set("relevanceLanguage", "en");
   searchUrl.searchParams.set("videoEmbeddable", "true");
   searchUrl.searchParams.set("safeSearch", "moderate");
@@ -49,9 +60,9 @@ export async function searchAndRank(
   const ids: string[] = (searchData.items || [])
     .map((it: any) => it.id?.videoId)
     .filter(Boolean);
-  if (ids.length === 0) return null;
+  if (ids.length === 0) return [];
 
-  // Step 2: videos.list (1 unit) for duration + stats
+  // Step 2: videos.list (1 unit) for snippet + duration + stats
   const videoUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
   videoUrl.searchParams.set("part", "snippet,contentDetails,statistics");
   videoUrl.searchParams.set("id", ids.join(","));
@@ -67,6 +78,8 @@ export async function searchAndRank(
     youtubeId: it.id,
     title: it.snippet?.title ?? "",
     channelName: it.snippet?.channelTitle ?? "",
+    description: it.snippet?.description ?? "",
+    tags: (it.snippet?.tags as string[] | undefined) ?? [],
     duration: parseISODuration(it.contentDetails?.duration ?? "PT0S"),
     viewCount: parseInt(it.statistics?.viewCount ?? "0", 10),
     likeCount: parseInt(it.statistics?.likeCount ?? "0", 10),
@@ -77,11 +90,29 @@ export async function searchAndRank(
   );
   const pool = filtered.length > 0 ? filtered : candidates;
 
-  // Rank by a log-weighted blend of views + likes. Dislikes are no longer
-  // exposed by the API, so we cannot use them.
-  const score = (v: RankedVideo) =>
-    Math.log10(v.viewCount + 1) * 2 + Math.log10(v.likeCount + 1);
-  pool.sort((a, b) => score(b) - score(a));
+  pool.sort((a, b) => popularity(b) - popularity(a));
+  return pool.slice(0, limit);
+}
 
-  return pool[0] ?? null;
+/** Backwards-compatible single-best lookup (by popularity). */
+export async function searchAndRank(
+  apiKey: string,
+  query: string,
+  opts: { minSeconds?: number; maxSeconds?: number } = {},
+): Promise<RankedVideo | null> {
+  const list = await searchCandidates(apiKey, query, opts);
+  return list[0] ?? null;
+}
+
+/**
+ * Fraction of lesson keywords that appear in a video's title/description/tags.
+ * A simple, quota-free relevance proxy in the range 0..1.
+ */
+export function relevanceScore(v: RankedVideo, keywords: string[]): number {
+  if (keywords.length === 0) return 0;
+  const hay =
+    `${v.title} ${v.description} ${(v.tags || []).join(" ")}`.toLowerCase();
+  let hits = 0;
+  for (const k of keywords) if (hay.includes(k)) hits++;
+  return hits / keywords.length;
 }

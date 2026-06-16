@@ -4,8 +4,12 @@
 import { prisma } from "@/lib/prisma";
 import { encryptSecret } from "@/lib/crypto";
 import { resolveKey, consumeHouseGeneration, Provider } from "@/lib/keys";
-import { generateCourseOutline } from "@/lib/groq";
-import { searchAndRank } from "@/lib/youtube";
+import { generateCourseOutline, pickBestVideoIndex } from "@/lib/groq";
+import {
+  searchCandidates,
+  relevanceScore,
+  type RankedVideo,
+} from "@/lib/youtube";
 import { GenerateRequest } from "@/types/course";
 import { awardLessonCompletion, Reward } from "@/lib/gamification";
 
@@ -166,7 +170,10 @@ export async function getCourse(userId: string, courseId: string) {
 export async function fetchLessonVideo(userId: string, lessonId: string) {
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
-    include: { video: true },
+    include: {
+      video: true,
+      module: { include: { course: true } },
+    },
   });
   if (!lesson) throw new ServiceError("Lesson not found", 404);
   if (lesson.video) return lesson.video;
@@ -174,33 +181,47 @@ export async function fetchLessonVideo(userId: string, lessonId: string) {
   const ytKey = await resolveKey(userId, "youtube");
   if (!ytKey) throw new ServiceError("No YouTube API key configured", 400);
 
-  let ranked;
+  const course = lesson.module.course;
+
+  // Videos already used by other lessons in this course, so we never repeat one.
+  const usedIds = await courseVideoYoutubeIds(course.id);
+
+  // Fold the course topic into the query so generic searches still stay on-topic.
+  const query = enrichQuery(course.topic, lesson.youtubeQuery);
+
+  let candidates: RankedVideo[];
   try {
-    ranked = await searchAndRank(ytKey.key, lesson.youtubeQuery);
+    candidates = await searchCandidates(ytKey.key, query);
   } catch (e) {
     throw new ServiceError(
       e instanceof Error ? e.message : "YouTube lookup failed",
       502,
     );
   }
-  if (!ranked) throw new ServiceError("No suitable video found", 404);
+
+  // Drop anything already used elsewhere in the course (dedup).
+  let pool = candidates.filter((c) => !usedIds.has(c.youtubeId));
+  if (pool.length === 0) pool = candidates; // nothing fresh left; allow reuse
+
+  const chosen = await selectBestVideo(userId, course.topic, lesson, pool);
+  if (!chosen) throw new ServiceError("No suitable video found", 404);
 
   const video = await prisma.video.upsert({
-    where: { youtubeId: ranked.youtubeId },
+    where: { youtubeId: chosen.youtubeId },
     update: {
-      title: ranked.title,
-      channelName: ranked.channelName,
-      duration: ranked.duration,
-      viewCount: ranked.viewCount,
-      likeCount: ranked.likeCount,
+      title: chosen.title,
+      channelName: chosen.channelName,
+      duration: chosen.duration,
+      viewCount: chosen.viewCount,
+      likeCount: chosen.likeCount,
     },
     create: {
-      youtubeId: ranked.youtubeId,
-      title: ranked.title,
-      channelName: ranked.channelName,
-      duration: ranked.duration,
-      viewCount: ranked.viewCount,
-      likeCount: ranked.likeCount,
+      youtubeId: chosen.youtubeId,
+      title: chosen.title,
+      channelName: chosen.channelName,
+      duration: chosen.duration,
+      viewCount: chosen.viewCount,
+      likeCount: chosen.likeCount,
     },
   });
   await prisma.lesson.update({
@@ -208,6 +229,98 @@ export async function fetchLessonVideo(userId: string, lessonId: string) {
     data: { videoId: video.id },
   });
   return video;
+}
+
+/** youtubeIds already attached to any lesson in the given course. */
+async function courseVideoYoutubeIds(courseId: string): Promise<Set<string>> {
+  const lessons = await prisma.lesson.findMany({
+    where: { module: { courseId }, videoId: { not: null } },
+    select: { video: { select: { youtubeId: true } } },
+  });
+  return new Set(
+    lessons
+      .map((l) => l.video?.youtubeId)
+      .filter((id): id is string => Boolean(id)),
+  );
+}
+
+/** Ensure the course topic is present in the query for better, on-topic hits. */
+function enrichQuery(topic: string, query: string): string {
+  const q = query.trim();
+  const lower = q.toLowerCase();
+  const topicWords = topic.toLowerCase().split(/\s+/).filter(Boolean);
+  const hasTopic =
+    topicWords.length > 0 && topicWords.every((w) => lower.includes(w));
+  return hasTopic ? q : `${q} ${topic}`.trim();
+}
+
+const STOPWORDS = new Set(
+  "a an the to of for and or in on at with how what why your you this that using use intro introduction lesson video tutorial guide basics fundamentals overview practice task example examples step steps part learn learning".split(
+    /\s+/,
+  ),
+);
+
+function buildKeywords(...parts: string[]): string[] {
+  const text = parts.join(" ").toLowerCase().replace(/practice task.*$/s, " ");
+  const words = text
+    .split(/[^a-z0-9+#.]+/)
+    .map((w) => w.replace(/^\.+|\.+$/g, ""))
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+  return Array.from(new Set(words));
+}
+
+/**
+ * Choose the best video for a lesson. Prefers an LLM judge that reads each
+ * candidate's title + description (a reliable proxy for "what the video is
+ * about"); falls back to keyword-relevance blended with popularity, dropping
+ * clearly off-topic candidates when better ones exist.
+ */
+async function selectBestVideo(
+  userId: string,
+  topic: string,
+  lesson: { title: string; description: string; youtubeQuery: string },
+  pool: RankedVideo[],
+): Promise<RankedVideo | null> {
+  if (pool.length === 0) return null;
+  if (pool.length === 1) return pool[0];
+
+  const groqKey = await resolveKey(userId, "groq");
+  if (groqKey) {
+    try {
+      const idx = await pickBestVideoIndex(
+        groqKey.key,
+        { title: lesson.title, description: lesson.description, topic },
+        pool.map((c) => ({
+          title: c.title,
+          channelName: c.channelName,
+          description: c.description,
+          duration: c.duration,
+        })),
+      );
+      if (idx >= 0 && idx < pool.length) return pool[idx];
+    } catch {
+      // fall through to algorithmic ranking
+    }
+  }
+
+  const keywords = buildKeywords(
+    topic,
+    lesson.title,
+    lesson.description,
+    lesson.youtubeQuery,
+  );
+  const popular = (v: RankedVideo) =>
+    Math.log10((v.viewCount || 0) + 1) * 2 + Math.log10((v.likeCount || 0) + 1);
+  const scored = pool.map((v) => ({
+    v,
+    rel: relevanceScore(v, keywords),
+    pop: popular(v),
+  }));
+  // Relevance filter: if any candidate matches the lesson, drop the off-topic ones.
+  const relevant = scored.filter((s) => s.rel > 0);
+  const finalPool = relevant.length > 0 ? relevant : scored;
+  finalPool.sort((a, b) => b.rel * 3 + b.pop - (a.rel * 3 + a.pop));
+  return finalPool[0]?.v ?? null;
 }
 
 export async function setProgress(
@@ -242,5 +355,143 @@ export async function setUserKey(
   await prisma.user.update({
     where: { id: userId },
     data: { [field]: value ? encryptSecret(value) : null },
+  });
+}
+
+/**
+ * Delete a course. The author (or an admin) removes the whole course for
+ * everyone (cascades modules/lessons/progress/notes/reviews/enrollments).
+ * A non-author who is merely enrolled only has their enrollment removed.
+ */
+export async function deleteCourse(
+  userId: string,
+  courseId: string,
+  isAdmin = false,
+): Promise<{ deleted: boolean; unenrolled: boolean }> {
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    select: { id: true, authorId: true },
+  });
+  if (!course) throw new ServiceError("Course not found", 404);
+
+  if (isAdmin || course.authorId === userId) {
+    await prisma.course.delete({ where: { id: courseId } });
+    return { deleted: true, unenrolled: false };
+  }
+
+  const enrollment = await prisma.enrollment.findUnique({
+    where: { userId_courseId: { userId, courseId } },
+  });
+  if (!enrollment) throw new ServiceError("You can't delete this course", 403);
+  await prisma.enrollment.delete({
+    where: { userId_courseId: { userId, courseId } },
+  });
+  return { deleted: false, unenrolled: true };
+}
+
+/**
+ * Replace a lesson's video with a different one, excluding the current video
+ * and any video already used elsewhere in the course. Caller must enforce that
+ * only the author/admin can do this (the video is shared across the course).
+ */
+export async function repickLessonVideo(userId: string, lessonId: string) {
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    include: {
+      video: true,
+      module: { include: { course: true } },
+    },
+  });
+  if (!lesson) throw new ServiceError("Lesson not found", 404);
+
+  const course = lesson.module.course;
+
+  const ytKey = await resolveKey(userId, "youtube");
+  if (!ytKey) throw new ServiceError("No YouTube API key configured", 400);
+
+  const usedIds = await courseVideoYoutubeIds(course.id);
+  const currentId = lesson.video?.youtubeId;
+  if (currentId) usedIds.add(currentId);
+
+  const query = enrichQuery(course.topic, lesson.youtubeQuery);
+  let candidates: RankedVideo[];
+  try {
+    candidates = await searchCandidates(ytKey.key, query);
+  } catch (e) {
+    throw new ServiceError(
+      e instanceof Error ? e.message : "YouTube lookup failed",
+      502,
+    );
+  }
+
+  let pool = candidates.filter((c) => !usedIds.has(c.youtubeId));
+  if (pool.length === 0)
+    pool = candidates.filter((c) => c.youtubeId !== currentId);
+  if (pool.length === 0) throw new ServiceError("No other video found", 404);
+
+  const chosen = await selectBestVideo(userId, course.topic, lesson, pool);
+  if (!chosen) throw new ServiceError("No other video found", 404);
+
+  const video = await prisma.video.upsert({
+    where: { youtubeId: chosen.youtubeId },
+    update: {
+      title: chosen.title,
+      channelName: chosen.channelName,
+      duration: chosen.duration,
+      viewCount: chosen.viewCount,
+      likeCount: chosen.likeCount,
+    },
+    create: {
+      youtubeId: chosen.youtubeId,
+      title: chosen.title,
+      channelName: chosen.channelName,
+      duration: chosen.duration,
+      viewCount: chosen.viewCount,
+      likeCount: chosen.likeCount,
+    },
+  });
+  await prisma.lesson.update({
+    where: { id: lesson.id },
+    data: { videoId: video.id },
+  });
+  return video;
+}
+
+/** Admin: list courses a user authored or is enrolled in, with their progress. */
+export async function listUserCourses(targetUserId: string) {
+  const courses = await prisma.course.findMany({
+    where: {
+      OR: [
+        { authorId: targetUserId },
+        { enrollments: { some: { userId: targetUserId } } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    include: {
+      modules: {
+        include: {
+          lessons: {
+            include: { progress: { where: { userId: targetUserId } } },
+          },
+        },
+      },
+      _count: { select: { enrollments: true } },
+    },
+  });
+  return courses.map((c) => {
+    const lessons = c.modules.flatMap((m) => m.lessons);
+    const done = lessons.filter((l) => l.progress[0]?.completed).length;
+    return {
+      id: c.id,
+      title: c.title,
+      topic: c.topic,
+      level: c.level,
+      isPublic: c.isPublic,
+      isAuthor: c.authorId === targetUserId,
+      total: lessons.length,
+      done,
+      enrolledCount: c._count.enrollments,
+      createdAt: c.createdAt,
+    };
   });
 }

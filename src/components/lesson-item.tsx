@@ -5,7 +5,13 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatDuration } from "@/lib/utils";
 
-export function LessonItem({ lesson }: { lesson: any }) {
+export function LessonItem({
+  lesson,
+  canManage = false,
+}: {
+  lesson: any;
+  canManage?: boolean;
+}) {
   const [video, setVideo] = useState<any>(lesson.video);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -14,6 +20,7 @@ export function LessonItem({ lesson }: { lesson: any }) {
   );
   const [error, setError] = useState("");
   const [reward, setReward] = useState<string>("");
+  const [repicking, setRepicking] = useState(false);
 
   // Notes
   const [notesOpen, setNotesOpen] = useState(false);
@@ -35,6 +42,21 @@ export function LessonItem({ lesson }: { lesson: any }) {
     setLoading(false);
     if (!res.ok) {
       setError(data.error || "Could not load video");
+      return;
+    }
+    setVideo(data.video);
+  }
+
+  async function repick() {
+    setRepicking(true);
+    setError("");
+    const res = await fetch(`/api/lessons/${lesson.id}/repick`, {
+      method: "POST",
+    });
+    const data = await res.json();
+    setRepicking(false);
+    if (!res.ok) {
+      setError(data.error || "Could not find another video");
       return;
     }
     setVideo(data.video);
@@ -158,6 +180,15 @@ export function LessonItem({ lesson }: { lesson: any }) {
                   Open on YouTube
                 </a>
               </p>
+              {canManage && (
+                <button
+                  onClick={repick}
+                  disabled={repicking}
+                  className="mt-2 rounded-lg border border-white/15 px-3 py-1 text-xs text-white/70 transition hover:bg-white/10 disabled:opacity-50"
+                >
+                  {repicking ? "Finding another..." : "🔄 Different video"}
+                </button>
+              )}
             </div>
           )}
         </div>

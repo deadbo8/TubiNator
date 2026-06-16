@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,11 +19,27 @@ type AdminUser = {
   _count: { courses: number; enrollments: number };
 };
 
+type AdminCourse = {
+  id: string;
+  title: string;
+  topic: string;
+  level: string;
+  isPublic: boolean;
+  isAuthor: boolean;
+  total: number;
+  done: number;
+  enrolledCount: number;
+  createdAt: string;
+};
+
 export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
   const [q, setQ] = useState("");
+  const [openUser, setOpenUser] = useState<string | null>(null);
+  const [courses, setCourses] = useState<Record<string, AdminCourse[]>>({});
+  const [coursesLoading, setCoursesLoading] = useState(false);
 
   async function load() {
     const res = await fetch("/api/admin/users");
@@ -54,6 +70,33 @@ export default function AdminPage() {
     if (!confirm(`Delete ${email || "this user"} permanently? This cannot be undone.`))
       return;
     await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  async function loadCourses(id: string) {
+    setCoursesLoading(true);
+    const res = await fetch(`/api/admin/users/${id}/courses`);
+    const data = await res.json().catch(() => ({ courses: [] }));
+    setCourses((c) => ({ ...c, [id]: data.courses || [] }));
+    setCoursesLoading(false);
+  }
+
+  function toggleCourses(id: string) {
+    if (openUser === id) {
+      setOpenUser(null);
+      return;
+    }
+    setOpenUser(id);
+    if (!courses[id]) loadCourses(id);
+  }
+
+  async function removeCourse(userId: string, courseId: string, title: string) {
+    if (
+      !confirm(`Delete "${title}" permanently? This removes it for everyone.`)
+    )
+      return;
+    await fetch(`/api/courses/${courseId}`, { method: "DELETE" });
+    await loadCourses(userId);
     load();
   }
 
@@ -108,7 +151,8 @@ export default function AdminPage() {
           </thead>
           <tbody>
             {filtered.map((u) => (
-              <tr key={u.id} className="border-b border-white/5">
+              <Fragment key={u.id}>
+              <tr className="border-b border-white/5">
                 <td className="p-3">
                   <div className="font-medium">{u.name || "—"}</div>
                   <div className="text-white/40">{u.email || "(no email)"}</div>
@@ -148,6 +192,13 @@ export default function AdminPage() {
                   <div className="flex gap-2">
                     <Button
                       size="sm"
+                      variant={openUser === u.id ? "primary" : "outline"}
+                      onClick={() => toggleCourses(u.id)}
+                    >
+                      Courses
+                    </Button>
+                    <Button
+                      size="sm"
                       variant="outline"
                       onClick={() => patch(u.id, { banned: !u.banned })}
                     >
@@ -162,6 +213,53 @@ export default function AdminPage() {
                   </div>
                 </td>
               </tr>
+              {openUser === u.id && (
+                <tr className="border-b border-white/10 bg-black/20">
+                  <td colSpan={6} className="p-3">
+                    {coursesLoading && !courses[u.id] ? (
+                      <p className="text-white/50">Loading courses...</p>
+                    ) : (courses[u.id]?.length ?? 0) === 0 ? (
+                      <p className="text-white/40">No courses.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {(courses[u.id] || []).map((c) => (
+                          <div
+                            key={c.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate font-medium">
+                                {c.title}
+                              </div>
+                              <div className="text-xs text-white/40">
+                                {c.level} · {c.topic} · {c.done}/{c.total} done
+                                {c.isAuthor ? " · author" : " · enrolled"}
+                                {c.isPublic ? " · public" : ""}
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <Link href={`/courses/${c.id}`} target="_blank">
+                                <Button size="sm" variant="outline">
+                                  View
+                                </Button>
+                              </Link>
+                              <button
+                                onClick={() =>
+                                  removeCourse(u.id, c.id, c.title)
+                                }
+                                className="rounded-xl border border-red-500/30 px-3 text-sm text-red-400 transition hover:bg-red-500/10"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>
