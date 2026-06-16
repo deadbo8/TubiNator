@@ -261,7 +261,7 @@ const STOPWORDS = new Set(
 );
 
 function buildKeywords(...parts: string[]): string[] {
-  const text = parts.join(" ").toLowerCase().replace(/practice task.*$/s, " ");
+  const text = parts.join(" ").toLowerCase().replace(/practice task[\s\S]*$/, " ");
   const words = text
     .split(/[^a-z0-9+#.]+/)
     .map((w) => w.replace(/^\.+|\.+$/g, ""))
