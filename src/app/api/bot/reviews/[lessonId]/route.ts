@@ -1,20 +1,17 @@
 import { NextResponse } from "next/server";
 import { checkBotSecret } from "@/lib/botAuth";
-import {
-  resolveTelegramUser,
-  setProgress,
-  ServiceError,
-} from "@/lib/courseService";
+import { resolveTelegramUser, ServiceError } from "@/lib/courseService";
+import { gradeReview } from "@/lib/gamification";
 import { z } from "zod";
 
 const schema = z.object({
   telegramId: z.string().min(1),
-  completed: z.boolean(),
+  remembered: z.boolean(),
 });
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: { lessonId: string } },
 ) {
   const unauth = checkBotSecret(req);
   if (unauth) return unauth;
@@ -26,12 +23,10 @@ export async function POST(
 
   try {
     const userId = await resolveTelegramUser(parsed.data.telegramId);
-    const { progress, reward } = await setProgress(
-      userId,
-      params.id,
-      parsed.data.completed,
-    );
-    return NextResponse.json({ progress, reward });
+    const result = await gradeReview(userId, params.lessonId, parsed.data.remembered);
+    if (!result.ok)
+      return NextResponse.json({ error: "Review not found" }, { status: 404 });
+    return NextResponse.json(result);
   } catch (e) {
     if (e instanceof ServiceError)
       return NextResponse.json({ error: e.message }, { status: e.status });

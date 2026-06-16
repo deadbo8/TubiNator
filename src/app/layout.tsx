@@ -10,10 +10,21 @@ const display = Space_Grotesk({
   variable: "--font-display",
 });
 
+const siteUrl =
+  process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+
 export const metadata: Metadata = {
-  title: "Tubinator \u2014 Learn anything, your way",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: "Tubinator \u2014 Learn anything, your way",
+    template: "%s",
+  },
   description:
     "Turn any topic into a personalized learning journey powered by AI and YouTube.",
+  openGraph: {
+    siteName: "Tubinator",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

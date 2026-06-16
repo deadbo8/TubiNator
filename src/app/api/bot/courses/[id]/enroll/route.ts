@@ -1,16 +1,10 @@
 import { NextResponse } from "next/server";
 import { checkBotSecret } from "@/lib/botAuth";
-import {
-  resolveTelegramUser,
-  setProgress,
-  ServiceError,
-} from "@/lib/courseService";
+import { resolveTelegramUser, ServiceError } from "@/lib/courseService";
+import { enrollUser } from "@/lib/catalog";
 import { z } from "zod";
 
-const schema = z.object({
-  telegramId: z.string().min(1),
-  completed: z.boolean(),
-});
+const schema = z.object({ telegramId: z.string().min(1) });
 
 export async function POST(
   req: Request,
@@ -26,12 +20,10 @@ export async function POST(
 
   try {
     const userId = await resolveTelegramUser(parsed.data.telegramId);
-    const { progress, reward } = await setProgress(
-      userId,
-      params.id,
-      parsed.data.completed,
-    );
-    return NextResponse.json({ progress, reward });
+    const result = await enrollUser(userId, params.id);
+    if (!result.ok)
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    return NextResponse.json(result);
   } catch (e) {
     if (e instanceof ServiceError)
       return NextResponse.json({ error: e.message }, { status: e.status });

@@ -12,14 +12,18 @@ export function SiteHeader() {
   const pathname = usePathname();
   const { status } = useSession();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [due, setDue] = useState(0);
 
   useEffect(() => {
     if (status !== "authenticated") return;
     fetch("/api/account")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setIsAdmin(Boolean(d?.isAdmin)))
+      .then((d) => {
+        setIsAdmin(Boolean(d?.isAdmin));
+        setDue(Number(d?.stats?.dueReviews ?? 0));
+      })
       .catch(() => {});
-  }, [status]);
+  }, [status, pathname]);
 
   if (status !== "authenticated") return null;
   if (HIDDEN.includes(pathname)) return null;
@@ -38,6 +42,25 @@ export function SiteHeader() {
     );
   };
 
+  const reviewLink = () => {
+    const active = pathname === "/review";
+    return (
+      <Link
+        href="/review"
+        className={`relative rounded-lg px-3 py-1.5 text-sm transition ${
+          active ? "bg-white/10 text-white" : "text-white/60 hover:text-white"
+        }`}
+      >
+        Review
+        {due > 0 && (
+          <span className="ml-1 rounded-full bg-[hsl(var(--primary))] px-1.5 py-0.5 text-[10px] font-semibold text-black">
+            {due}
+          </span>
+        )}
+      </Link>
+    );
+  };
+
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-black/30 backdrop-blur-xl">
       <nav className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
@@ -48,6 +71,8 @@ export function SiteHeader() {
         </Link>
         <div className="flex items-center gap-1">
           {link("/dashboard", "Dashboard")}
+          {link("/explore", "Explore")}
+          {reviewLink()}
           {link("/generate", "New course")}
           {link("/settings", "Settings")}
           {isAdmin && link("/admin", "Admin")}

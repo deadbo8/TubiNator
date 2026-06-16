@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminEmail } from "@/lib/admin";
+import { getStats } from "@/lib/gamification";
 
 // Returns the signed-in user's profile summary (used by settings + nav).
 export async function GET() {
@@ -14,6 +15,8 @@ export async function GET() {
   if (!user)
     return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  const stats = await getStats(userId);
+
   return NextResponse.json({
     id: user.id,
     name: user.name,
@@ -22,5 +25,6 @@ export async function GET() {
     hasPassword: Boolean(user.passwordHash),
     emailVerified: Boolean(user.emailVerified),
     isAdmin: isAdminEmail(user.email),
+    stats,
   });
 }

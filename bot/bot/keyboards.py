@@ -79,6 +79,37 @@ def settings_kb(account) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def review_grade_kb(lesson_id) -> InlineKeyboardMarkup:
+    """Grade buttons for a spaced-repetition flashcard."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="😕 Forgot", callback_data=f"rev:{lesson_id}:0"
+                ),
+                InlineKeyboardButton(
+                    text="😊 Remembered", callback_data=f"rev:{lesson_id}:1"
+                ),
+            ]
+        ]
+    )
+
+
+def explore_kb(courses) -> InlineKeyboardMarkup:
+    """List of public courses; tap to add one to your learning."""
+    rows = []
+    for c in courses:
+        label = f"{c['title']} ({c['lessons']} lessons)"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=label[:60], callback_data=f"enroll:{c['id']}"
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_users_kb(users) -> InlineKeyboardMarkup:
     """One row per user; tap to open that user's management actions."""
     rows = []

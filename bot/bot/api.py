@@ -129,6 +129,37 @@ async def set_password(telegram_id, new_password, current_password=None):
     return await _request("POST", "/api/bot/password", json=payload)
 
 
+# ---- Reviews (spaced repetition) ----
+async def get_reviews(telegram_id):
+    return await _request(
+        "GET", "/api/bot/reviews", params={"telegramId": str(telegram_id)}
+    )
+
+
+async def grade_review(telegram_id, lesson_id, remembered):
+    return await _request(
+        "POST",
+        f"/api/bot/reviews/{lesson_id}",
+        json={"telegramId": str(telegram_id), "remembered": remembered},
+    )
+
+
+# ---- Explore (public catalog) ----
+async def explore_courses(q=None):
+    params = {}
+    if q:
+        params["q"] = q
+    return await _request("GET", "/api/bot/explore", params=params)
+
+
+async def enroll_course(telegram_id, course_id):
+    return await _request(
+        "POST",
+        f"/api/bot/courses/{course_id}/enroll",
+        json={"telegramId": str(telegram_id)},
+    )
+
+
 # ---- Admin ----
 async def admin_list_users(telegram_id):
     return await _request(

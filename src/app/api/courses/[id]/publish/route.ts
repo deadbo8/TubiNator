@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { setProgress } from "@/lib/courseService";
+import { setCourseVisibility } from "@/lib/catalog";
 import { z } from "zod";
 
-const schema = z.object({ completed: z.boolean() });
+const schema = z.object({ isPublic: z.boolean() });
 
 export async function POST(
   req: Request,
@@ -19,11 +19,8 @@ export async function POST(
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
-  const { progress, reward } = await setProgress(
-    userId,
-    params.id,
-    parsed.data.completed,
-  );
-
-  return NextResponse.json({ progress, reward });
+  const result = await setCourseVisibility(userId, params.id, parsed.data.isPublic);
+  if (!result.ok)
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  return NextResponse.json(result);
 }

@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { setProgress } from "@/lib/courseService";
+import { gradeReview } from "@/lib/gamification";
 import { z } from "zod";
 
-const schema = z.object({ completed: z.boolean() });
+const schema = z.object({ remembered: z.boolean() });
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: { lessonId: string } },
 ) {
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id;
@@ -19,11 +19,8 @@ export async function POST(
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
-  const { progress, reward } = await setProgress(
-    userId,
-    params.id,
-    parsed.data.completed,
-  );
-
-  return NextResponse.json({ progress, reward });
+  const result = await gradeReview(userId, params.lessonId, parsed.data.remembered);
+  if (!result.ok)
+    return NextResponse.json({ error: "Review not found" }, { status: 404 });
+  return NextResponse.json(result);
 }

@@ -31,5 +31,10 @@ export async function GET(
   if (!course)
     return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  return NextResponse.json({ course });
+  return NextResponse.json({
+    course,
+    isAuthor: course.authorId === userId,
+    isPublic: course.isPublic,
+    slug: course.slug,
+  });
 }

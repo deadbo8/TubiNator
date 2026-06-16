@@ -14,7 +14,9 @@ from .keyboards import (
     admin_users_kb,
     course_kb,
     courses_kb,
+    explore_kb,
     level_kb,
+    review_grade_kb,
     settings_kb,
 )
 
@@ -26,7 +28,9 @@ HELP_TEXT = (
     "<b>Commands</b>\n"
     "/learn – create a new course\n"
     "/courses – view your courses &amp; progress\n"
-    "/me – your account &amp; usage\n"
+    "/review – review due lessons (spaced repetition)\n"
+    "/explore – browse &amp; add public courses\n"
+    "/me – your account, XP &amp; streak\n"
     "/settings – email, password &amp; API keys\n"
     "/admin – admin panel (admins only)\n"
     "/cancel – abort the current action\n"
@@ -56,6 +60,10 @@ class Password(StatesGroup):
 
 class AdminLimit(StatesGroup):
     waiting = State()
+
+
+class Explore(StatesGroup):
+    query = State()
 
 
 def fmt_duration(seconds) -> str:
@@ -103,6 +111,20 @@ def render_account_text(acc) -> str:
         f"Groq key: {html.escape(groq)}",
         f"YouTube key: {html.escape(yt)}",
     ]
+    stats = acc.get("stats") or {}
+    if stats:
+        lines.append("")
+        lines.append(
+            f"⚡ Level {stats.get('level', 1)} · {stats.get('xp', 0)} XP "
+            f"({stats.get('levelPct', 0)}% to next)"
+        )
+        lines.append(
+            f"🔥 Streak: {stats.get('streak', 0)} day(s) "
+            f"(best {stats.get('longestStreak', 0)})"
+        )
+        due = stats.get("dueReviews", 0)
+        if due:
+            lines.append(f"🧠 {due} review(s) due — use /review")
     if acc.get("isAdmin"):
         lines.append("Role: ⭐ admin")
     if acc.get("banned"):
@@ -260,6 +282,101 @@ async def cmd_me(msg: Message):
         await msg.answer(f"⚠️ {html.escape(str(e))}")
         return
     await msg.answer(render_account_text(acc))
+
+
+# ---- /review (spaced repetition) ----
+async def _send_next_review(target, telegram_id):
+    try:
+        data = await api.get_reviews(telegram_id)
+    except ApiError as e:
+        await target.answer(f"⚠️ {html.escape(str(e))}")
+        return
+    reviews = data.get("reviews") or []
+    if not reviews:
+        await target.answer(
+            "🎉 Nothing to review right now. Complete lessons to schedule "
+            "spaced-repetition reviews, and check back later!"
+        )
+        return
+    r = reviews[0]
+    title = html.escape(r.get("title") or "this lesson")
+    course = html.escape(r.get("courseTitle") or "")
+    text = (
+        f"🧠 <b>Review</b> ({len(reviews)} due)\n\n"
+        f"Do you still remember:\n<b>{title}</b>"
+    )
+    if course:
+        text += f"\n<i>{course}</i>"
+    await target.answer(text, reply_markup=review_grade_kb(r["lessonId"]))
+
+
+@router.message(Command("review"))
+async def cmd_review(msg: Message):
+    await _send_next_review(msg, msg.from_user.id)
+
+
+@router.callback_query(F.data.startswith("rev:"))
+async def cb_review_grade(cb: CallbackQuery):
+    _, lesson_id, flag = cb.data.split(":")
+    remembered = flag == "1"
+    try:
+        res = await api.grade_review(cb.from_user.id, lesson_id, remembered)
+    except ApiError as e:
+        await cb.answer(str(e), show_alert=True)
+        return
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if remembered:
+        days = res.get("intervalDays", 1)
+        await cb.answer(f"Nice! Next review in {days} day(s) 🔁")
+    else:
+        await cb.answer("No worries — we'll show it again tomorrow.")
+    await _send_next_review(cb.message, cb.from_user.id)
+
+
+# ---- /explore (public catalog) ----
+@router.message(Command("explore"))
+async def cmd_explore(msg: Message, state: FSMContext):
+    await state.set_state(Explore.query)
+    await msg.answer(
+        "🔍 Send a topic to search the public catalog, or send "
+        "<b>all</b> to see everything."
+    )
+
+
+@router.message(Explore.query, F.text)
+async def explore_query(msg: Message, state: FSMContext):
+    await state.clear()
+    q = msg.text.strip()
+    if q.lower() == "all":
+        q = None
+    try:
+        courses = (await api.explore_courses(q)).get("courses") or []
+    except ApiError as e:
+        await msg.answer(f"⚠️ {html.escape(str(e))}")
+        return
+    if not courses:
+        await msg.answer("No public courses found. Try a different search.")
+        return
+    await msg.answer(
+        "🌐 <b>Public courses</b>\nTap one to add it to your learning:",
+        reply_markup=explore_kb(courses),
+    )
+
+
+@router.callback_query(F.data.startswith("enroll:"))
+async def cb_enroll(cb: CallbackQuery):
+    course_id = cb.data.split(":", 1)[1]
+    try:
+        await api.enroll_course(cb.from_user.id, course_id)
+        course = (await api.get_course(cb.from_user.id, course_id))["course"]
+    except ApiError as e:
+        await cb.answer(str(e), show_alert=True)
+        return
+    await cb.answer("Added to your learning ✅")
+    await cb.message.answer(render_course_text(course), reply_markup=course_kb(course))
 
 
 # ---- /settings ----

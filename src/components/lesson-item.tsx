@@ -13,6 +13,7 @@ export function LessonItem({ lesson }: { lesson: any }) {
     !!lesson.progress?.[0]?.completed,
   );
   const [error, setError] = useState("");
+  const [reward, setReward] = useState<string>("");
 
   // Notes
   const [notesOpen, setNotesOpen] = useState(false);
@@ -42,11 +43,22 @@ export function LessonItem({ lesson }: { lesson: any }) {
   async function toggleComplete() {
     const next = !completed;
     setCompleted(next);
-    await fetch(`/api/lessons/${lesson.id}/progress`, {
+    const res = await fetch(`/api/lessons/${lesson.id}/progress`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ completed: next }),
-    });
+    })
+      .then((r) => r.json())
+      .catch(() => null);
+    if (res?.reward?.xpAwarded) {
+      const r = res.reward;
+      setReward(
+        r.leveledUp
+          ? `+${r.xpAwarded} XP \u00b7 Level ${r.level}! \ud83c\udf89`
+          : `+${r.xpAwarded} XP \u00b7 \ud83d\udd25 ${r.streak}`,
+      );
+      setTimeout(() => setReward(""), 2500);
+    }
   }
 
   async function toggleNotes() {
@@ -94,6 +106,11 @@ export function LessonItem({ lesson }: { lesson: any }) {
             >
               {lesson.title}
             </h3>
+            {reward && (
+              <span className="animate-pulse rounded-full bg-[hsl(var(--primary))]/20 px-2 py-0.5 text-xs font-semibold text-[hsl(var(--primary))]">
+                {reward}
+              </span>
+            )}
           </div>
           <p className="mt-1 pl-7 text-sm text-white/50">
             {lesson.description}

@@ -9,6 +9,7 @@ import { resolveTelegramUser, ServiceError } from "@/lib/courseService";
 import { isAdminEmail } from "@/lib/admin";
 import { isEmailConfigured } from "@/lib/email";
 import { createAndSendOtp, verifyOtp, normalizeEmail } from "@/lib/otp";
+import { getStats } from "@/lib/gamification";
 
 function houseLimit(): number {
   const n = parseInt(process.env.HOUSE_DAILY_LIMIT || "5", 10);
@@ -31,7 +32,9 @@ export async function getBotAccount(telegramId: string, name?: string) {
   if (!user) throw new ServiceError("Account not found", 404);
 
   const limit = user.dailyGenLimit ?? houseLimit();
+  const stats = await getStats(userId);
   return {
+    stats,
     email: user.email,
     emailVerified: Boolean(user.emailVerified),
     hasPassword: Boolean(user.passwordHash),

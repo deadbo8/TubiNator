@@ -7,6 +7,7 @@ import { resolveKey, consumeHouseGeneration, Provider } from "@/lib/keys";
 import { generateCourseOutline } from "@/lib/groq";
 import { searchAndRank } from "@/lib/youtube";
 import { GenerateRequest } from "@/types/course";
+import { awardLessonCompletion, Reward } from "@/lib/gamification";
 
 export class ServiceError extends Error {
   status: number;
@@ -191,12 +192,23 @@ export async function setProgress(
   userId: string,
   lessonId: string,
   completed: boolean,
-) {
-  return prisma.progress.upsert({
+): Promise<{ progress: Awaited<ReturnType<typeof prisma.progress.upsert>>; reward: Reward | null }> {
+  const existing = await prisma.progress.findUnique({
+    where: { userId_lessonId: { userId, lessonId } },
+    select: { completed: true },
+  });
+  const progress = await prisma.progress.upsert({
     where: { userId_lessonId: { userId, lessonId } },
     update: { completed },
     create: { userId, lessonId, completed },
   });
+
+  // Only award XP / streak / schedule a review on a fresh completion.
+  let reward: Reward | null = null;
+  if (completed && !existing?.completed) {
+    reward = await awardLessonCompletion(userId, lessonId);
+  }
+  return { progress, reward };
 }
 
 export async function setUserKey(

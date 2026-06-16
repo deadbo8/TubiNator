@@ -3,12 +3,16 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { getStats } from "@/lib/gamification";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id as string;
+
+  const stats = await getStats(userId);
+  const levelStyle = { width: stats.levelPct + "%" };
 
   const enrollments = await prisma.enrollment.findMany({
     where: { userId },
@@ -36,11 +40,50 @@ export default async function Dashboard() {
           </p>
         </div>
         <div className="flex gap-3">
+          <Link href="/explore">
+            <Button variant="outline">Explore</Button>
+          </Link>
           <Link href="/generate">
             <Button>+ New course</Button>
           </Link>
         </div>
       </header>
+
+      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        <Card className="flex items-center gap-4">
+          <span className="text-3xl">⚡</span>
+          <div className="w-full">
+            <p className="text-sm text-white/50">Level {stats.level}</p>
+            <p className="text-xl font-semibold">{stats.xp} XP</p>
+            <div className="mt-2 h-1.5 w-full rounded-full bg-white/10">
+              <div
+                className="h-1.5 rounded-full bg-[hsl(var(--primary))]"
+                style={levelStyle}
+              />
+            </div>
+          </div>
+        </Card>
+        <Card className="flex items-center gap-4">
+          <span className="text-3xl">🔥</span>
+          <div>
+            <p className="text-sm text-white/50">Day streak</p>
+            <p className="text-xl font-semibold">{stats.streak}</p>
+            <p className="text-xs text-white/40">Best: {stats.longestStreak}</p>
+          </div>
+        </Card>
+        <Link href="/review">
+          <Card className="flex h-full items-center gap-4 transition hover:scale-[1.02]">
+            <span className="text-3xl">🧠</span>
+            <div>
+              <p className="text-sm text-white/50">Reviews due</p>
+              <p className="text-xl font-semibold">{stats.dueReviews}</p>
+              <p className="text-xs text-[hsl(var(--primary))]">
+                {stats.dueReviews > 0 ? "Start review →" : "All caught up"}
+              </p>
+            </div>
+          </Card>
+        </Link>
+      </div>
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
         {enrollments.length === 0 && (

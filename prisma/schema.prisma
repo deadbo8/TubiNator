@@ -21,11 +21,16 @@ model User {
   dailyGenResetAt DateTime?
   dailyGenLimit   Int?         // per-user override of the house daily limit (admin-set)
   banned          Boolean      @default(false)
+  xp              Int          @default(0)  // gamification: total experience points
+  streakCount     Int          @default(0)  // current consecutive-day streak
+  longestStreak   Int          @default(0)
+  lastActiveDate  DateTime?                  // UTC date of last learning activity (for streaks)
   accounts        Account[]
   courses         Course[]     // courses this user authored
   enrollments     Enrollment[]
   progress        Progress[]
   notes           Note[]
+  reviews         Review[]
   createdAt       DateTime     @default(now())
 }
 
@@ -57,6 +62,9 @@ model Course {
   author      User?        @relation(fields: [authorId], references: [id])
   modules     Module[]
   enrollments Enrollment[]
+  isPublic    Boolean      @default(false) // listed in the public catalog
+  slug        String?      @unique          // public, SEO-friendly URL slug
+  publishedAt DateTime?
   createdAt   DateTime     @default(now())
 
   @@unique([topic, level, goal]) // dedupe / shared cache key
@@ -94,6 +102,7 @@ model Lesson {
   module       Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   progress     Progress[]
   notes        Note[]
+  reviews      Review[]
 }
 
 model Video {
@@ -132,6 +141,25 @@ model Note {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, lessonId])
+}
+
+// Spaced-repetition review schedule (SM-2 lite). One row per user+lesson once
+// the lesson is completed; dueAt advances as the user grades their recall.
+model Review {
+  id           String   @id @default(cuid())
+  userId       String
+  lessonId     String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson       Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  intervalDays Int      @default(1)
+  ease         Float    @default(2.5)
+  reps         Int      @default(0)
+  dueAt        DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, lessonId])
+  @@index([userId, dueAt])
 }
 
 // Short-lived one-time codes for email verification and passwordless login.
